@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "yatpa",
+  "version": "1.0.0",
+  "name": "YATPA",
+  "authors": [
+    "CevAPI"
+  ],
+  "description": "Yet Another TPA for Fabric server",
+  "environment": "server",
+  "entrypoints": {
+    "server": [
+      "dev.yatpa.fabric.YatpaFabricMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.10",
+    "minecraft": "1.21.x",
+    "fabric-api": "*"
+  }
+}

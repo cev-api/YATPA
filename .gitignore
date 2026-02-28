@@ -1,0 +1,43 @@
+# Gradle
+.gradle/
+.gradle-userhome/
+build/
+**/build/
+
+# Local temp tooling
+.tmp-gradle/
+.tmp-settings-paper.gradle.kts
+
+# Java
+*.class
+*.log
+hs_err_pid*
+replay_pid*
+
+# IntelliJ
+.idea/
+*.iml
+out/
+
+# VS Code
+.vscode/
+
+# Eclipse
+.project
+.classpath
+.settings/
+
+# NetBeans
+nbproject/private/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Runtime files
+run/
+logs/

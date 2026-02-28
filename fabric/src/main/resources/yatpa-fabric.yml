@@ -1,0 +1,53 @@
+# Admin teleport command:
+# /ytp <player>
+# /ytp <x> <y> <z> [realm]
+# realm can be overworld, nether, end, or a loaded dimension id/path.
+settings:
+  max_homes_default: 3
+  request_timeout_seconds: 60
+  request_cooldown_seconds: 30
+  teleport_delay_seconds: 5
+  cancel_on_move: true
+  cancel_on_damage: true
+  spawn_radius: 50
+  rtp_cooldown_seconds: 300
+  rtp:
+    default_min_distance: 64
+    default_max_distance: 2500
+  landing:
+    mode: EXACT
+    random_offset_max: 4
+  features:
+    enabled: true
+    tpa: true
+    tpahere: true
+    homes: true
+    rtp: true
+  costs:
+    enabled: false
+    mode: NONE
+    xp_levels:
+      tpa: 4
+      tpahere: 4
+      home: 16
+      rtp: 30
+      spawn: 8
+    item:
+      material: ENDER_PEARL
+      tpa: 2
+      tpahere: 2
+      home: 20
+      rtp: 50
+      spawn: 10
+sounds:
+  request_sent: ENTITY_EXPERIENCE_ORB_PICKUP
+  request_received: BLOCK_NOTE_BLOCK_PLING
+  countdown: BLOCK_BELL_USE
+  success: ENTITY_ENDERMAN_TELEPORT
+  cancelled: BLOCK_GLASS_BREAK
+effects:
+  request_sent: PORTAL
+  request_received: ENCHANT
+  countdown: WAX_OFF
+  success: END_ROD
+  cancelled: SMOKE
