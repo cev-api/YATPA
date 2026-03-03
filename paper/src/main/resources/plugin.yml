@@ -1,5 +1,5 @@
 name: YATPA
-version: 1.0.0
+version: 1.0.1
 main: dev.yatpa.paper.YatpaPaperPlugin
 api-version: '1.21'
 authors: [CevAPI]

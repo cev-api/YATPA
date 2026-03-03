@@ -67,6 +67,9 @@ public class TeleportService {
             return;
         }
         cancel(actor.getUniqueId(), "");
+        if (charge.paid() != null && !charge.paid().isBlank()) {
+            actor.sendMessage(messages.get("prefix") + "Paid " + charge.paid() + ".");
+        }
 
         Location origin = actor.getLocation().clone();
         int delay = Math.max(0, config.teleportDelaySeconds());

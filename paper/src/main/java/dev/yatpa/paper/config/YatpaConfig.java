@@ -30,6 +30,8 @@ public class YatpaConfig {
     private final int rtpCooldownSeconds;
     private final int rtpMinDistance;
     private final int rtpMaxDistance;
+    private final Map<String, Integer> realmRtpMin;
+    private final Map<String, Integer> realmRtpMax;
     private final LandingMode landingMode;
     private final int landingRandomOffset;
     private final boolean appEnabled;
@@ -42,6 +44,10 @@ public class YatpaConfig {
     private final Material costItem;
     private final Map<TeleportKind, Integer> xpCosts;
     private final Map<TeleportKind, Integer> itemCosts;
+    private final Map<String, Integer> realmXpRtpCosts;
+    private final Map<String, Integer> realmItemRtpCosts;
+    private final Map<String, Map<TeleportKind, Integer>> xpCostsByWorld;
+    private final Map<String, Map<TeleportKind, Integer>> itemCostsByWorld;
     private final Map<String, Sound> sounds;
     private final Map<String, Particle> effects;
 
@@ -69,7 +75,13 @@ public class YatpaConfig {
         Map<TeleportKind, Integer> xpCosts,
         Map<TeleportKind, Integer> itemCosts,
         Map<String, Sound> sounds,
-        Map<String, Particle> effects
+        Map<String, Particle> effects,
+        Map<String, Map<TeleportKind, Integer>> xpCostsByWorld,
+        Map<String, Map<TeleportKind, Integer>> itemCostsByWorld,
+        Map<String, Integer> realmXpRtpCosts,
+        Map<String, Integer> realmItemRtpCosts,
+        Map<String, Integer> realmRtpMin,
+        Map<String, Integer> realmRtpMax
     ) {
         this.maxHomesDefault = maxHomesDefault;
         this.requestTimeoutSeconds = requestTimeoutSeconds;
@@ -93,6 +105,12 @@ public class YatpaConfig {
         this.costItem = costItem;
         this.xpCosts = xpCosts;
         this.itemCosts = itemCosts;
+        this.xpCostsByWorld = xpCostsByWorld != null ? xpCostsByWorld : new java.util.HashMap<>();
+        this.itemCostsByWorld = itemCostsByWorld != null ? itemCostsByWorld : new java.util.HashMap<>();
+        this.realmXpRtpCosts = realmXpRtpCosts != null ? realmXpRtpCosts : new java.util.HashMap<>();
+        this.realmItemRtpCosts = realmItemRtpCosts != null ? realmItemRtpCosts : new java.util.HashMap<>();
+        this.realmRtpMin = realmRtpMin != null ? realmRtpMin : new java.util.HashMap<>();
+        this.realmRtpMax = realmRtpMax != null ? realmRtpMax : new java.util.HashMap<>();
         this.sounds = sounds;
         this.effects = effects;
     }
@@ -100,6 +118,12 @@ public class YatpaConfig {
     public static YatpaConfig from(FileConfiguration config) {
         Map<TeleportKind, Integer> xp = new EnumMap<>(TeleportKind.class);
         Map<TeleportKind, Integer> items = new EnumMap<>(TeleportKind.class);
+        Map<String, Map<TeleportKind, Integer>> xpByWorld = new java.util.HashMap<>();
+        Map<String, Map<TeleportKind, Integer>> itemByWorld = new java.util.HashMap<>();
+        Map<String, Integer> realmXpRtp = new java.util.HashMap<>();
+        Map<String, Integer> realmItemRtp = new java.util.HashMap<>();
+        Map<String, Integer> realmMin = new java.util.HashMap<>();
+        Map<String, Integer> realmMax = new java.util.HashMap<>();
         for (TeleportKind kind : TeleportKind.values()) {
             String key = kind.name().toLowerCase();
             xp.put(kind, config.getInt("settings.costs.xp_levels." + key, 0));
@@ -115,6 +139,52 @@ public class YatpaConfig {
         for (String key : new String[]{"request_sent", "request_received", "countdown", "success", "cancelled"}) {
             effects.put(key, parseParticle(config.getString("effects." + key, "")));
         }
+
+        // parse per-world overrides using keys like settings.costs.xp_levels.<world>.<teleport>
+        for (String full : config.getKeys(true)) {
+            if (full.startsWith("settings.costs.xp_levels.")) {
+                String rest = full.substring("settings.costs.xp_levels.".length());
+                int idx = rest.indexOf('.');
+                if (idx > 0) {
+                    String world = rest.substring(0, idx);
+                    String kindKey = rest.substring(idx + 1);
+                    try {
+                        TeleportKind kind = TeleportKind.valueOf(kindKey.toUpperCase());
+                        int val = config.getInt(full, 0);
+                        xpByWorld.computeIfAbsent(world, w -> new EnumMap<>(TeleportKind.class)).put(kind, val);
+                    } catch (IllegalArgumentException ignored) {}
+                }
+            }
+            if (full.startsWith("settings.costs.item.")) {
+                String rest = full.substring("settings.costs.item.".length());
+                int idx = rest.indexOf('.');
+                if (idx > 0) {
+                    String world = rest.substring(0, idx);
+                    String kindKey = rest.substring(idx + 1);
+                    try {
+                        TeleportKind kind = TeleportKind.valueOf(kindKey.toUpperCase());
+                        int val = config.getInt(full, 0);
+                        itemByWorld.computeIfAbsent(world, w -> new EnumMap<>(TeleportKind.class)).put(kind, val);
+                    } catch (IllegalArgumentException ignored) {}
+                }
+            }
+        }
+
+        // Parse realm-friendly RTP cost overrides (overworld/nether/end)
+        realmXpRtp.put("overworld", config.getInt("settings.costs.xp_levels.rtp.overworld", 0));
+        realmXpRtp.put("nether", config.getInt("settings.costs.xp_levels.rtp.nether", 0));
+        realmXpRtp.put("end", config.getInt("settings.costs.xp_levels.rtp.end", 0));
+        realmItemRtp.put("overworld", config.getInt("settings.costs.item.rtp.overworld", 0));
+        realmItemRtp.put("nether", config.getInt("settings.costs.item.rtp.nether", 0));
+        realmItemRtp.put("end", config.getInt("settings.costs.item.rtp.end", 0));
+
+        // Parse realm-friendly RTP distance overrides
+        if (config.isInt("settings.rtp.realm_min_distance.overworld")) realmMin.put("overworld", config.getInt("settings.rtp.realm_min_distance.overworld"));
+        if (config.isInt("settings.rtp.realm_min_distance.nether")) realmMin.put("nether", config.getInt("settings.rtp.realm_min_distance.nether"));
+        if (config.isInt("settings.rtp.realm_min_distance.end")) realmMin.put("end", config.getInt("settings.rtp.realm_min_distance.end"));
+        if (config.isInt("settings.rtp.realm_max_distance.overworld")) realmMax.put("overworld", config.getInt("settings.rtp.realm_max_distance.overworld"));
+        if (config.isInt("settings.rtp.realm_max_distance.nether")) realmMax.put("nether", config.getInt("settings.rtp.realm_max_distance.nether"));
+        if (config.isInt("settings.rtp.realm_max_distance.end")) realmMax.put("end", config.getInt("settings.rtp.realm_max_distance.end"));
 
         return new YatpaConfig(
             config.getInt("settings.max_homes_default", 3),
@@ -140,8 +210,50 @@ public class YatpaConfig {
             xp,
             items,
             sounds,
-            effects
+            effects,
+            xpByWorld,
+            itemByWorld,
+            realmXpRtp,
+            realmItemRtp,
+            realmMin,
+            realmMax
         );
+    }
+
+    public int xpCost(TeleportKind kind, org.bukkit.World world) {
+        if (world == null) return xpCost(kind);
+        if (kind == dev.yatpa.paper.data.TeleportKind.RTP) {
+            String env = switch (world.getEnvironment()) {
+                case NORMAL -> "overworld";
+                case NETHER -> "nether";
+                case THE_END -> "end";
+                default -> "";
+            };
+            Integer v = realmXpRtpCosts.get(env);
+            if (v != null && v > 0) return v;
+        }
+        String w = world.getName();
+        Map<TeleportKind, Integer> map = xpCostsByWorld.get(w);
+        if (map != null && map.containsKey(kind)) return map.get(kind);
+        return xpCost(kind);
+    }
+
+    public int itemCost(TeleportKind kind, org.bukkit.World world) {
+        if (world == null) return itemCost(kind);
+        if (kind == dev.yatpa.paper.data.TeleportKind.RTP) {
+            String env = switch (world.getEnvironment()) {
+                case NORMAL -> "overworld";
+                case NETHER -> "nether";
+                case THE_END -> "end";
+                default -> "";
+            };
+            Integer v = realmItemRtpCosts.get(env);
+            if (v != null && v > 0) return v;
+        }
+        String w = world.getName();
+        Map<TeleportKind, Integer> map = itemCostsByWorld.get(w);
+        if (map != null && map.containsKey(kind)) return map.get(kind);
+        return itemCost(kind);
     }
 
     private static Sound parseSound(String name) {
@@ -194,6 +306,27 @@ public class YatpaConfig {
     public int rtpCooldownSeconds() { return rtpCooldownSeconds; }
     public int rtpMinDistance() { return rtpMinDistance; }
     public int rtpMaxDistance() { return rtpMaxDistance; }
+    public int rtpMin(org.bukkit.World world) {
+        if (world == null) return rtpMinDistance;
+        String env = switch (world.getEnvironment()) {
+            case NORMAL -> "overworld";
+            case NETHER -> "nether";
+            case THE_END -> "end";
+            default -> "";
+        };
+        return realmRtpMin.getOrDefault(env, rtpMinDistance);
+    }
+
+    public int rtpMax(org.bukkit.World world) {
+        if (world == null) return rtpMaxDistance;
+        String env = switch (world.getEnvironment()) {
+            case NORMAL -> "overworld";
+            case NETHER -> "nether";
+            case THE_END -> "end";
+            default -> "";
+        };
+        return realmRtpMax.getOrDefault(env, rtpMaxDistance);
+    }
     public LandingMode landingMode() { return landingMode; }
     public int landingRandomOffset() { return landingRandomOffset; }
     public boolean appEnabled() { return appEnabled; }

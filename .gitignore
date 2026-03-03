@@ -3,6 +3,10 @@
 .gradle-userhome/
 build/
 **/build/
+.gradle-local/
+out/
+classes/
+logs/
 
 # Local temp tooling
 .tmp-gradle/
@@ -20,7 +24,11 @@ replay_pid*
 out/
 
 # VS Code
+.settings/
 .vscode/
+bin/
+.classpath
+.project
 
 # Eclipse
 .project
@@ -37,7 +45,14 @@ nbdist/
 # OS files
 .DS_Store
 Thumbs.db
+desktop.ini
+*.rar
 
 # Runtime files
 run/
 logs/
+
+# python
+*.pyc
+*.py
+

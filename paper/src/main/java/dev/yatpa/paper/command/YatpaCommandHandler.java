@@ -194,24 +194,46 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                 continue;
             }
             String key = kind.name().toLowerCase(Locale.ROOT);
-            String cost;
-            if (xpMode) {
-                int amount = liveConfig.getInt("settings.costs.xp_levels." + key, 0);
-                if (amount <= 0) {
-                    continue;
+            if (kind == TeleportKind.RTP) {
+                // Realm-specific display for RTP
+                String[] realms = new String[]{"overworld", "nether", "end"};
+                String[] realmLabels = new String[]{"Overworld", "Nether", "End"};
+                for (int i = 0; i < realms.length; i++) {
+                    String realm = realms[i];
+                    String label = realmLabels[i];
+                    String cost;
+                    if (xpMode) {
+                        int realmVal = liveConfig.getInt("settings.costs.xp_levels.rtp." + realm, -1);
+                        int globalVal = liveConfig.getInt("settings.costs.xp_levels.rtp", 0);
+                        int amount = realmVal >= 0 ? realmVal : globalVal;
+                        if (amount <= 0) continue;
+                        cost = "§e" + amount + " XP level" + (amount == 1 ? "" : "s");
+                    } else {
+                        int realmVal = liveConfig.getInt("settings.costs.item.rtp." + realm, -1);
+                        int globalVal = liveConfig.getInt("settings.costs.item.rtp", 0);
+                        int amount = realmVal >= 0 ? realmVal : globalVal;
+                        if (amount <= 0) continue;
+                        cost = "§e" + amount + " " + displayMaterial(itemMaterial);
+                    }
+                    lines.add("§a" + commandFor(kind) + " §7(" + label + ") - " + cost);
                 }
-                cost = "§e" + amount + " XP level" + (amount == 1 ? "" : "s");
             } else {
-                int amount = liveConfig.getInt("settings.costs.item." + key, 0);
-                if (amount <= 0) {
-                    continue;
+                String cost;
+                if (xpMode) {
+                    int amount = liveConfig.getInt("settings.costs.xp_levels." + key, 0);
+                    if (amount <= 0) {
+                        continue;
+                    }
+                    cost = "§e" + amount + " XP level" + (amount == 1 ? "" : "s");
+                } else {
+                    int amount = liveConfig.getInt("settings.costs.item." + key, 0);
+                    if (amount <= 0) {
+                        continue;
+                    }
+                    cost = "§e" + amount + " " + displayMaterial(itemMaterial);
                 }
-                cost = "§e" + amount + " " + displayMaterial(itemMaterial);
+                lines.add("§a" + commandFor(kind) + " §7- " + cost);
             }
-            if (cost == null) {
-                continue;
-            }
-            lines.add("§a" + commandFor(kind) + " §7- " + cost);
         }
         if (lines.isEmpty()) {
             return;
@@ -511,7 +533,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         teleports.queueTeleport(
             player,
             TeleportKind.RTP,
-            () -> findRandomSafe(player.getWorld(), player.getLocation(), config.rtpMinDistance(), config.rtpMaxDistance()),
+            () -> findRandomSafe(player.getWorld(), player.getLocation(), config.rtpMin(player.getWorld()), config.rtpMax(player.getWorld())),
             () -> rtpCooldowns.put(player.getUniqueId(), System.currentTimeMillis())
         );
         return true;
@@ -904,7 +926,13 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
     }
 
     private boolean setSetting(CommandSender sender, String path, String value) {
-        if (!plugin.getConfig().contains(path) && !FEATURE_PATHS.contains(path)) {
+        boolean dynamicAllowed =
+            path.startsWith("settings.rtp.realm_min_distance.") ||
+            path.startsWith("settings.rtp.realm_max_distance.") ||
+            path.startsWith("settings.costs.xp_levels.rtp.") ||
+            path.startsWith("settings.costs.item.rtp.");
+
+        if (!plugin.getConfig().contains(path) && !FEATURE_PATHS.contains(path) && !dynamicAllowed) {
             sender.sendMessage(messages.get("prefix") + "§cUnknown setting path: §e" + path);
             sender.sendMessage(messages.get("prefix") + "§7Try: §f/yatpa settings");
             return true;
@@ -915,8 +943,17 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         }
 
         Object current = plugin.getConfig().get(path);
-        if (current == null && FEATURE_PATHS.contains(path)) {
-            current = Boolean.TRUE;
+        if (current == null) {
+            if (FEATURE_PATHS.contains(path)) {
+                current = Boolean.TRUE; // feature toggles default to boolean
+            } else if (
+                path.startsWith("settings.rtp.realm_min_distance.") ||
+                path.startsWith("settings.rtp.realm_max_distance.") ||
+                path.startsWith("settings.costs.xp_levels.rtp.") ||
+                path.startsWith("settings.costs.item.rtp.")
+            ) {
+                current = Integer.valueOf(0); // treat as integer when not present
+            }
         }
         Object parsed = parseValue(current, value);
         if (parsed == null && current != null) {
@@ -985,10 +1022,25 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
     }
 
     private List<String> editableConfigPaths() {
-        return java.util.stream.Stream.concat(
+        List<String> realmKeys = List.of(
+            "settings.costs.item.rtp.overworld",
+            "settings.costs.item.rtp.nether",
+            "settings.costs.item.rtp.end",
+            "settings.costs.xp_levels.rtp.overworld",
+            "settings.costs.xp_levels.rtp.nether",
+            "settings.costs.xp_levels.rtp.end",
+            "settings.rtp.realm_min_distance.overworld",
+            "settings.rtp.realm_min_distance.nether",
+            "settings.rtp.realm_min_distance.end",
+            "settings.rtp.realm_max_distance.overworld",
+            "settings.rtp.realm_max_distance.nether",
+            "settings.rtp.realm_max_distance.end"
+        );
+        return java.util.stream.Stream.of(
                 plugin.getConfig().getKeys(true).stream(),
-                FEATURE_PATHS.stream()
-            )
+                FEATURE_PATHS.stream(),
+                realmKeys.stream()
+            ).flatMap(s -> s)
             .filter(key -> !plugin.getConfig().isConfigurationSection(key))
             .sorted()
             .distinct()

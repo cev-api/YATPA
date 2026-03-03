@@ -9,14 +9,10 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
 public class CostService {
-    public record ChargeResult(boolean success, String required) {
-        public static ChargeResult ok() {
-            return new ChargeResult(true, "");
-        }
-
-        public static ChargeResult fail(String required) {
-            return new ChargeResult(false, required);
-        }
+    public record ChargeResult(boolean success, String required, String paid) {
+        public static ChargeResult ok() { return new ChargeResult(true, "", ""); }
+        public static ChargeResult okPaid(String paid) { return new ChargeResult(true, "", paid); }
+        public static ChargeResult fail(String required) { return new ChargeResult(false, required, ""); }
     }
 
     private final YatpaConfig config;
@@ -30,7 +26,7 @@ public class CostService {
             return ChargeResult.ok();
         }
         if (config.costMode() == YatpaConfig.CostMode.XP_LEVELS) {
-            int cost = config.xpCost(kind);
+            int cost = config.xpCost(kind, player.getWorld());
             if (cost <= 0) {
                 return ChargeResult.ok();
             }
@@ -38,9 +34,9 @@ public class CostService {
                 return ChargeResult.fail(cost + " XP level" + (cost == 1 ? "" : "s"));
             }
             player.setLevel(player.getLevel() - cost);
-            return ChargeResult.ok();
+            return ChargeResult.okPaid(cost + " XP level" + (cost == 1 ? "" : "s"));
         }
-        int amount = config.itemCost(kind);
+        int amount = config.itemCost(kind, player.getWorld());
         if (amount <= 0) {
             return ChargeResult.ok();
         }
@@ -59,7 +55,7 @@ public class CostService {
             return ChargeResult.fail(amount + " " + itemDisplayName(config.costItem().name()));
         }
         player.getInventory().removeItem(new ItemStack(config.costItem(), amount));
-        return ChargeResult.ok();
+        return ChargeResult.okPaid(amount + " " + itemDisplayName(config.costItem().name()));
     }
 
     private String itemDisplayName(String material) {
