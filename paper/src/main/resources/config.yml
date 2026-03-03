@@ -14,6 +14,16 @@ settings:
   rtp:
     default_min_distance: 64
     default_max_distance: 2500
+    # Optional per-realm overrides (only apply to Paper RTP search radius):
+    # If not set, the defaults above are used.
+    realm_min_distance:
+      # overworld: 96
+      # nether: 48
+      # end: 128
+    realm_max_distance:
+      # overworld: 3000
+      # nether: 1500
+      # end: 4000
   landing:
     mode: EXACT # EXACT or RANDOM_OFFSET
     random_offset_max: 4
@@ -31,6 +41,10 @@ settings:
       tpahere: 4
       home: 16
       rtp: 30
+      rtp:
+        overworld: 0
+        nether: 0
+        end: 0
       spawn: 8
     item:
       material: DIAMOND
@@ -38,6 +52,10 @@ settings:
       tpahere: 2
       home: 20
       rtp: 50
+      rtp:
+        overworld: 0
+        nether: 0
+        end: 0
       spawn: 10
 sounds:
   request_sent: ENTITY_EXPERIENCE_ORB_PICKUP

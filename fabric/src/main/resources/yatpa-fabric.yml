@@ -39,14 +39,22 @@ settings:
       home: 20
       rtp: 50
       spawn: 10
-sounds:
+        rtp: 30
+        rtp:
+          overworld: 0
+          nether: 0
+          end: 0
   request_sent: ENTITY_EXPERIENCE_ORB_PICKUP
   request_received: BLOCK_NOTE_BLOCK_PLING
   countdown: BLOCK_BELL_USE
   success: ENTITY_ENDERMAN_TELEPORT
   cancelled: BLOCK_GLASS_BREAK
 effects:
-  request_sent: PORTAL
+        rtp: 50
+        rtp:
+          overworld: 0
+          nether: 0
+          end: 0
   request_received: ENCHANT
   countdown: WAX_OFF
   success: END_ROD

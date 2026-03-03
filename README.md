@@ -29,9 +29,8 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
   - `/spawn`
 - OP commands:
   - `/ytp <player>`
-  - `/ytp <x> <y> <z> [realm]` with safeguards against teleporting into blocks and suffocating if not in creative/spectator.
+  - `/ytp <x> <y> <z> [realm]` 
   - `/tpoffline <player>`
-  - `realm` accepts `overworld`, `nether`, `end`, or a loaded dimension id/path (for example `minecraft:the_end`).
 - In-game admin config (OP):
   - `/yatpa settings`
   - `/yatpa set <path> <value>`
@@ -54,16 +53,21 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
 - Cost failures show exact requirement (for example, required XP levels or item amount/type).
 - Feature toggles for `tpa`, `tpahere`, `homes`, and `rtp`.
 - RTP cooldown (`settings.rtp_cooldown_seconds`, default `300`).
+- The `ytp` and `rtp` commands have safeguards against teleporting into lava or into walls/blocks and will move you to the nearest safe spot.
+- The `ytp` command also lets you teleport into different realms/dimensions.
+- The `rtp` command can have different costs for each realm/dimension.
+- `rtp` min/max distances can be overridden per realm (Overworld/Nether/End) on Fabric and Paper.
+- After a successful paid teleport, the player is told exactly what they paid (XP or items).
 
 ## Paper build output
 
 The Paper module is configured to build:
-- `paper/build/libs/YATPA-v1.0.0-Paper.jar`
+- `paper/build/libs/YATPA-v1.x.x-Paper.jar`
 
 ## Fabric build output
 
 The Fabric module is configured to build:
-- `fabric/build/libs/YATPA-v1.0.0-Fabric.jar`
+- `fabric/build/libs/YATPA-v1.x.x-Fabric.jar`
 
 ## Build
 
@@ -115,6 +119,15 @@ settings:
   rtp:
     default_min_distance: 64
     default_max_distance: 2500
+    # Optional per-realm overrides
+    realm_min_distance:
+      overworld: 96
+      nether: 48
+      end: 128
+    realm_max_distance:
+      overworld: 3000
+      nether: 1500
+      end: 4000
   landing:
     mode: EXACT # EXACT or RANDOM_OFFSET
     random_offset_max: 4
@@ -131,14 +144,22 @@ settings:
       tpa: 4
       tpahere: 4
       home: 16
-      rtp: 30
+      # Per-realm RTP overrides (optional; overrides global if set)
+      rtp:
+        overworld: 30
+        nether: 0
+        end: 0
       spawn: 8
     item:
       material: DIAMOND
       tpa: 2
       tpahere: 2
       home: 20
-      rtp: 50
+      # Per-realm RTP overrides (optional; overrides global if set)
+      rtp:
+        overworld: 30
+        nether: 0
+        end: 0
       spawn: 10
 sounds:
   request_sent: ENTITY_EXPERIENCE_ORB_PICKUP
