@@ -570,28 +570,72 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             send(player, "teleport_success");
             return true;
         }
-        if (args.length != 3 && args.length != 4) {
-            send(player, "usage_tp");
+        if (args.length == 2) {
+            Player actor = Bukkit.getPlayerExact(args[0]);
+            Player target = Bukkit.getPlayerExact(args[1]);
+            if (actor == null || target == null) {
+                send(player, "player_not_online");
+                return true;
+            }
+            actor.teleport(resolveYtpDestination(actor, target.getLocation()));
+            send(player, "teleport_success");
+            if (!actor.getUniqueId().equals(player.getUniqueId())) {
+                send(actor, "teleport_success");
+            }
+            return true;
+        }
+        if (args.length == 3 || args.length == 4) {
+            Double x = parseCoordinate(args[0]);
+            Double y = parseCoordinate(args[1]);
+            Double z = parseCoordinate(args[2]);
+            if (x == null || y == null || z == null) {
+                send(player, "usage_tp");
+                return true;
+            }
+
+            World world = args.length == 4 ? resolveRealm(args[3], player.getWorld()) : player.getWorld();
+            if (world == null) {
+                player.sendMessage(messages.get("prefix") + "§cUnknown realm/world: §e" + args[3]);
+                return true;
+            }
+
+            Location destination = new Location(world, x, y, z, player.getLocation().getYaw(), player.getLocation().getPitch());
+            player.teleport(resolveYtpDestination(player, destination));
+            send(player, "teleport_success");
+            return true;
+        }
+        if (args.length == 4 || args.length == 5) {
+            Player actor = Bukkit.getPlayerExact(args[0]);
+            if (actor == null) {
+                send(player, "player_not_online");
+                return true;
+            }
+
+            Double x = parseCoordinate(args[1]);
+            Double y = parseCoordinate(args[2]);
+            Double z = parseCoordinate(args[3]);
+            if (x == null || y == null || z == null) {
+                send(player, "usage_tp");
+                return true;
+            }
+
+            World world = args.length == 5 ? resolveRealm(args[4], actor.getWorld()) : actor.getWorld();
+            if (world == null) {
+                player.sendMessage(messages.get("prefix") + "§cUnknown realm/world: §e" + args[4]);
+                return true;
+            }
+
+            Location actorLocation = actor.getLocation();
+            Location destination = new Location(world, x, y, z, actorLocation.getYaw(), actorLocation.getPitch());
+            actor.teleport(resolveYtpDestination(actor, destination));
+            send(player, "teleport_success");
+            if (!actor.getUniqueId().equals(player.getUniqueId())) {
+                send(actor, "teleport_success");
+            }
             return true;
         }
 
-        Double x = parseCoordinate(args[0]);
-        Double y = parseCoordinate(args[1]);
-        Double z = parseCoordinate(args[2]);
-        if (x == null || y == null || z == null) {
-            send(player, "usage_tp");
-            return true;
-        }
-
-        World world = args.length == 4 ? resolveRealm(args[3], player.getWorld()) : player.getWorld();
-        if (world == null) {
-            player.sendMessage(messages.get("prefix") + "§cUnknown realm/world: §e" + args[3]);
-            return true;
-        }
-
-        Location destination = new Location(world, x, y, z, player.getLocation().getYaw(), player.getLocation().getPitch());
-        player.teleport(resolveYtpDestination(player, destination));
-        send(player, "teleport_success");
+        send(player, "usage_tp");
         return true;
     }
 
@@ -868,8 +912,17 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             if (args.length == 1) {
                 return partial(onlineNames(), args[0]);
             }
+            if (args.length == 2 && !isCoordinateToken(args[0])) {
+                return partial(onlineNames(), args[1]);
+            }
             if (args.length == 4 && areCoordinates(args[0], args[1], args[2])) {
                 return partial(realmOptions(), args[3]);
+            }
+            if (args.length == 4 && !isCoordinateToken(args[0]) && areCoordinates(args[1], args[2], args[3])) {
+                return partial(realmOptions(), "");
+            }
+            if (args.length == 5 && !isCoordinateToken(args[0]) && areCoordinates(args[1], args[2], args[3])) {
+                return partial(realmOptions(), args[4]);
             }
             return Collections.emptyList();
         }
@@ -892,6 +945,10 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
 
     private boolean areCoordinates(String x, String y, String z) {
         return parseCoordinate(x) != null && parseCoordinate(y) != null && parseCoordinate(z) != null;
+    }
+
+    private boolean isCoordinateToken(String value) {
+        return parseCoordinate(value) != null || "~".equals(value);
     }
 
     private List<String> partial(List<String> options, String input) {

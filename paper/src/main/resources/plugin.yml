@@ -1,5 +1,5 @@
 name: YATPA
-version: 1.0.1
+version: 1.0.2
 main: dev.yatpa.paper.YatpaPaperPlugin
 api-version: '1.21'
 authors: [CevAPI]
@@ -31,7 +31,7 @@ commands:
   spawn:
     usage: /spawn
   ytp:
-    usage: /ytp <player|x y z [realm]>
+    usage: /ytp <player> [target|x y z [realm]] or /ytp <x y z [realm]>
     permission: yatpa.op.tp
   tpoffline:
     usage: /tpoffline <player>

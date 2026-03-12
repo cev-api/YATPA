@@ -1,5 +1,7 @@
 # Admin teleport command:
 # /ytp <player>
+# /ytp <player> <targetPlayer>
+# /ytp <player> <x> <y> <z> [realm]
 # /ytp <x> <y> <z> [realm]
 # realm can be overworld, nether, end, or a loaded dimension id/path.
 settings:

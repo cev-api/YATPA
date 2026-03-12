@@ -129,7 +129,16 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                         .then(Commands.argument("value", StringArgumentType.greedyString()).executes(this::setSetting)))));
             d.register(Commands.literal("ytp")
                 .requires(src -> src.hasPermission(2))
-                .then(Commands.argument("player", EntityArgument.player()).executes(this::opYtpPlayer))
+                .then(Commands.argument("player", EntityArgument.player())
+                    .executes(this::opYtpPlayer)
+                    .then(Commands.argument("target", EntityArgument.player()).executes(this::opYtpPlayerToPlayer))
+                    .then(Commands.argument("x", DoubleArgumentType.doubleArg())
+                        .then(Commands.argument("y", DoubleArgumentType.doubleArg())
+                            .then(Commands.argument("z", DoubleArgumentType.doubleArg())
+                                .executes(this::opYtpPlayerCoordinatesCurrentRealm)
+                                .then(Commands.argument("realm", StringArgumentType.word())
+                                    .suggests(this::suggestRealms)
+                                    .executes(this::opYtpPlayerCoordinatesRealm))))))
                 .then(Commands.argument("x", DoubleArgumentType.doubleArg())
                     .then(Commands.argument("y", DoubleArgumentType.doubleArg())
                         .then(Commands.argument("z", DoubleArgumentType.doubleArg())
@@ -588,8 +597,8 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         if (!ensureAppEnabled(ctx.getSource())) {
             return 0;
         }
-        ServerPlayer player = ctx.getSource().getPlayer();
-        if (player == null) {
+        ServerPlayer source = ctx.getSource().getPlayer();
+        if (source == null) {
             send(ctx.getSource(), "player_only");
             return 0;
         }
@@ -597,12 +606,39 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         try {
             target = EntityArgument.getPlayer(ctx, "player");
         } catch (CommandSyntaxException e) {
-            send(player, "player_not_online");
+            send(source, "player_not_online");
             return 0;
         }
-        TeleportTarget destination = resolveYtpTarget(player, target.serverLevel(), target.getX(), target.getY(), target.getZ(), player.getYRot(), player.getXRot());
-        teleport(player, destination);
-        send(player, "teleport_success");
+        TeleportTarget destination = resolveYtpTarget(source, target.serverLevel(), target.getX(), target.getY(), target.getZ(), source.getYRot(), source.getXRot());
+        teleport(source, destination);
+        send(source, "teleport_success");
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private int opYtpPlayerToPlayer(CommandContext<CommandSourceStack> ctx) {
+        if (!ensureAppEnabled(ctx.getSource())) {
+            return 0;
+        }
+        ServerPlayer source = ctx.getSource().getPlayer();
+        if (source == null) {
+            send(ctx.getSource(), "player_only");
+            return 0;
+        }
+        ServerPlayer actor;
+        ServerPlayer target;
+        try {
+            actor = EntityArgument.getPlayer(ctx, "player");
+            target = EntityArgument.getPlayer(ctx, "target");
+        } catch (CommandSyntaxException e) {
+            send(source, "player_not_online");
+            return 0;
+        }
+        TeleportTarget destination = resolveYtpTarget(actor, target.serverLevel(), target.getX(), target.getY(), target.getZ(), actor.getYRot(), actor.getXRot());
+        teleport(actor, destination);
+        send(source, "teleport_success");
+        if (!source.getUUID().equals(actor.getUUID())) {
+            send(actor, "teleport_success");
+        }
         return Command.SINGLE_SUCCESS;
     }
 
@@ -645,10 +681,67 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         return teleportToCoordinates(player, x, y, z, level);
     }
 
+    private int opYtpPlayerCoordinatesCurrentRealm(CommandContext<CommandSourceStack> ctx) {
+        if (!ensureAppEnabled(ctx.getSource())) {
+            return 0;
+        }
+        ServerPlayer source = ctx.getSource().getPlayer();
+        if (source == null) {
+            send(ctx.getSource(), "player_only");
+            return 0;
+        }
+        ServerPlayer actor;
+        try {
+            actor = EntityArgument.getPlayer(ctx, "player");
+        } catch (CommandSyntaxException e) {
+            send(source, "player_not_online");
+            return 0;
+        }
+        return teleportPlayerToCoordinates(source, actor, DoubleArgumentType.getDouble(ctx, "x"), DoubleArgumentType.getDouble(ctx, "y"), DoubleArgumentType.getDouble(ctx, "z"), actor.serverLevel());
+    }
+
+    private int opYtpPlayerCoordinatesRealm(CommandContext<CommandSourceStack> ctx) {
+        if (!ensureAppEnabled(ctx.getSource())) {
+            return 0;
+        }
+        ServerPlayer source = ctx.getSource().getPlayer();
+        if (source == null) {
+            send(ctx.getSource(), "player_only");
+            return 0;
+        }
+        ServerPlayer actor;
+        try {
+            actor = EntityArgument.getPlayer(ctx, "player");
+        } catch (CommandSyntaxException e) {
+            send(source, "player_not_online");
+            return 0;
+        }
+        double x = DoubleArgumentType.getDouble(ctx, "x");
+        double y = DoubleArgumentType.getDouble(ctx, "y");
+        double z = DoubleArgumentType.getDouble(ctx, "z");
+        String realm = StringArgumentType.getString(ctx, "realm");
+        ServerLevel level = resolveRealm(actor, realm);
+        if (level == null) {
+            sendRaw(source, "Unknown realm/world: " + realm);
+            return 0;
+        }
+        return teleportPlayerToCoordinates(source, actor, x, y, z, level);
+    }
+
     private int teleportToCoordinates(ServerPlayer player, double x, double y, double z, ServerLevel level) {
         TeleportTarget destination = resolveYtpTarget(player, level, x, y, z, player.getYRot(), player.getXRot());
         teleport(player, destination);
         send(player, "teleport_success");
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private int teleportPlayerToCoordinates(ServerPlayer source, ServerPlayer actor, double x, double y, double z, ServerLevel level) {
+        TeleportTarget destination = resolveYtpTarget(actor, level, x, y, z, actor.getYRot(), actor.getXRot());
+        teleport(actor, destination);
+        send(source, "teleport_success");
+        if (!source.getUUID().equals(actor.getUUID())) {
+            send(actor, "teleport_success");
+        }
         return Command.SINGLE_SUCCESS;
     }
 

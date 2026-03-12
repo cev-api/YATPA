@@ -29,6 +29,8 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
   - `/spawn`
 - OP commands:
   - `/ytp <player>`
+  - `/ytp <player> <targetPlayer>`
+  - `/ytp <player> <x> <y> <z> [realm]`
   - `/ytp <x> <y> <z> [realm]` 
   - `/tpoffline <player>`
 - In-game admin config (OP):

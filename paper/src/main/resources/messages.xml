@@ -38,7 +38,7 @@
   <message key="usage_block">&eUsage: /tpablock &lt;player&gt;</message>
   <message key="usage_unblock">&eUsage: /tpaunblock &lt;player&gt;</message>
   <message key="usage_tphome">&eUsage: /tphome [set|delete|list|default] [name]</message>
-  <message key="usage_tp">&eUsage: /ytp &lt;player|x y z [realm]&gt;</message>
+  <message key="usage_tp">&eUsage: /ytp &lt;player&gt; [target|x y z [realm]] or /ytp &lt;x y z [realm]&gt;</message>
   <message key="usage_tpoffline">&eUsage: /tpoffline &lt;player&gt;</message>
   <message key="rtp_cooldown">&cYou must wait %seconds%s before using /rtp again.</message>
   <message key="cost_failed">&cYou do not have enough resources for this teleport. Required: %required%.</message>
