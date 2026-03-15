@@ -1,4 +1,5 @@
 # YATPA
+Current version: `1.0.3`
 
 Yet Another TPA.
 
@@ -35,6 +36,7 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
   - `/tpoffline <player>`
 - In-game admin config (OP):
   - `/yatpa settings`
+  - `/yatpa gui` (Paper, paginated inventory editor for all settings; click to toggle/edit)
   - `/yatpa set <path> <value>`
   - `/yatpa reload`
 - Player help page:
@@ -52,6 +54,7 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
 - XML-based messages.
 - Configurable sounds and particle effects.
 - Configurable teleport costs for each teleport type (XP or Items).
+- Costs are charged at teleport execution time (after countdown), not when countdown starts.
 - Cost failures show exact requirement (for example, required XP levels or item amount/type).
 - Feature toggles for `tpa`, `tpahere`, `homes`, and `rtp`.
 - RTP cooldown (`settings.rtp_cooldown_seconds`, default `300`).
@@ -59,6 +62,9 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
 - The `ytp` command also lets you teleport into different realms/dimensions.
 - The `rtp` command can have different costs for each realm/dimension.
 - `rtp` min/max distances can be overridden per realm (Overworld/Nether/End) on Fabric and Paper.
+- Per-dimension restrictions:
+  - Disable `/rtp` only in specific dimensions.
+  - Disable all YATPA teleports in specific dimensions.
 - After a successful paid teleport, the player is told exactly what they paid (XP or items).
 
 ## Paper build output
@@ -130,6 +136,13 @@ settings:
       overworld: 3000
       nether: 1500
       end: 4000
+  dimension_restrictions:
+    # Use world names, realm aliases (overworld/nether/end), or namespaced ids.
+    # For namespaced ids in YAML, quote the key, for example "minecraft:the_nether".
+    disable_rtp:
+      nether: true
+    disable_teleport:
+      # "minecraft:the_end": true
   landing:
     mode: EXACT # EXACT or RANDOM_OFFSET
     random_offset_max: 4
@@ -176,6 +189,11 @@ effects:
   success: END_ROD
   cancelled: SMOKE
 ```
+
+Fabric `config.properties` supports the same restrictions with either:
+- `settings.dimension_restrictions.disable_rtp=overworld,minecraft:the_nether`
+- `settings.dimension_restrictions.disable_teleport=minecraft:the_end,my_custom_dimension`
+- Dynamic keys like `settings.dimension_restrictions.disable_teleport.minecraft:the_nether=true`
 
 ## Permissions (Paper)
 

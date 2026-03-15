@@ -1,5 +1,5 @@
 name: YATPA
-version: 1.0.2
+version: 1.0.3
 main: dev.yatpa.paper.YatpaPaperPlugin
 api-version: '1.21'
 authors: [CevAPI]
@@ -7,7 +7,7 @@ commands:
   tpa:
     usage: /tpa <player>
   yatpa:
-    usage: /yatpa <help|reload|settings|set <path> <value>>
+    usage: /yatpa <help|reload|settings|gui|set <path> <value>>
   tpahelp:
     usage: /tpahelp
   tphelp:

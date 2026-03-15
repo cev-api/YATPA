@@ -19,7 +19,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
 public class TeleportService {
-    private record PendingTeleport(BukkitTask task, Location origin, String cancelKey) {}
+    private record PendingTeleport(BukkitTask task, Location origin, TeleportKind kind, UUID payerId, String cancelKey) {}
 
     private final JavaPlugin plugin;
     private final YatpaConfig config;
@@ -51,31 +51,26 @@ public class TeleportService {
         play(player, "cancelled");
     }
 
-    public void queueTeleport(Player actor, TeleportKind kind, Supplier<Location> destinationSupplier) {
-        queueTeleport(actor, kind, destinationSupplier, () -> {});
+    public boolean queueTeleport(Player actor, TeleportKind kind, Supplier<Location> destinationSupplier) {
+        return queueTeleport(actor, kind, destinationSupplier, () -> {}, actor);
     }
 
-    public void queueTeleport(Player actor, TeleportKind kind, Supplier<Location> destinationSupplier, Runnable onSuccess) {
-        CostService.ChargeResult charge = costs.charge(actor, kind);
-        if (!charge.success()) {
-            String template = messages.get("cost_failed");
-            if ("cost_failed".equals(template) || !template.contains("%required%")) {
-                actor.sendMessage(messages.get("prefix") + "§cYou require " + charge.required() + " to teleport.");
-            } else {
-                tell(actor, "cost_failed", Map.of("required", charge.required()));
-            }
-            return;
+    public boolean queueTeleport(Player actor, TeleportKind kind, Supplier<Location> destinationSupplier, Runnable onSuccess) {
+        return queueTeleport(actor, kind, destinationSupplier, onSuccess, actor);
+    }
+
+    public boolean queueTeleport(Player actor, TeleportKind kind, Supplier<Location> destinationSupplier, Runnable onSuccess, Player payer) {
+        if (config.teleportDisabledIn(actor.getWorld())) {
+            tell(actor, "teleport_disabled_dimension", Map.of("dimension", actor.getWorld().getName()));
+            return false;
         }
         cancel(actor.getUniqueId(), "");
-        if (charge.paid() != null && !charge.paid().isBlank()) {
-            actor.sendMessage(messages.get("prefix") + "Paid " + charge.paid() + ".");
-        }
 
         Location origin = actor.getLocation().clone();
         int delay = Math.max(0, config.teleportDelaySeconds());
         if (delay == 0) {
-            execute(actor, destinationSupplier, onSuccess);
-            return;
+            execute(actor, kind, payer.getUniqueId(), destinationSupplier, onSuccess);
+            return true;
         }
 
         BukkitTask task = plugin.getServer().getScheduler().runTaskTimer(plugin, new Runnable() {
@@ -88,7 +83,7 @@ public class TeleportService {
                     return;
                 }
                 if (remaining <= 0) {
-                    execute(actor, destinationSupplier, onSuccess);
+                    execute(actor, kind, payer.getUniqueId(), destinationSupplier, onSuccess);
                     cancel(actor.getUniqueId(), "");
                     return;
                 }
@@ -99,12 +94,44 @@ public class TeleportService {
             }
         }, 0L, 20L);
 
-        pending.put(actor.getUniqueId(), new PendingTeleport(task, origin, ""));
+        pending.put(actor.getUniqueId(), new PendingTeleport(task, origin, kind, payer.getUniqueId(), ""));
+        return true;
     }
 
-    private void execute(Player actor, Supplier<Location> destinationSupplier, Runnable onSuccess) {
+    public CostService.ChargeResult previewCharge(Player actor, TeleportKind kind) {
+        return costs.preview(actor, kind);
+    }
+
+    private void execute(Player actor, TeleportKind kind, UUID payerId, Supplier<Location> destinationSupplier, Runnable onSuccess) {
+        if (config.teleportDisabledIn(actor.getWorld())) {
+            tell(actor, "teleport_disabled_dimension", Map.of("dimension", actor.getWorld().getName()));
+            return;
+        }
+        Player payer = plugin.getServer().getPlayer(payerId);
+        if (payer == null || !payer.isOnline()) {
+            actor.sendMessage(messages.get("prefix") + "§cTeleport cancelled because payment could not be collected.");
+            return;
+        }
+        CostService.ChargeResult charge = costs.charge(payer, kind);
+        if (!charge.success()) {
+            String template = messages.get("cost_failed");
+            if ("cost_failed".equals(template) || !template.contains("%required%")) {
+                payer.sendMessage(messages.get("prefix") + "§cYou require " + charge.required() + " to teleport.");
+            } else {
+                tell(payer, "cost_failed", Map.of("required", charge.required()));
+            }
+            return;
+        }
+        if (charge.paid() != null && !charge.paid().isBlank()) {
+            payer.sendMessage(messages.get("prefix") + "Paid " + charge.paid() + ".");
+        }
         Location destination = destinationSupplier.get();
         if (destination == null) {
+            return;
+        }
+        if (config.teleportDisabledIn(destination.getWorld())) {
+            String dimension = destination.getWorld() == null ? "unknown" : destination.getWorld().getName();
+            tell(actor, "teleport_disabled_dimension", Map.of("dimension", dimension));
             return;
         }
         Location adjusted = adjustLanding(destination);

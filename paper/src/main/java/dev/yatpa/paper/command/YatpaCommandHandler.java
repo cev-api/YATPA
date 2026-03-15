@@ -7,6 +7,7 @@ import dev.yatpa.paper.data.HomeLocation;
 import dev.yatpa.paper.data.RequestType;
 import dev.yatpa.paper.data.TeleportKind;
 import dev.yatpa.paper.data.TeleportRequest;
+import dev.yatpa.paper.gui.SettingsGui;
 import dev.yatpa.paper.service.DataStore;
 import dev.yatpa.paper.service.RequestService;
 import dev.yatpa.paper.service.TeleportService;
@@ -28,6 +29,9 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.GameMode;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -51,6 +55,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
     private final DataStore dataStore;
     private final RequestService requests;
     private final TeleportService teleports;
+    private final SettingsGui settingsGui;
     private final Map<UUID, Long> rtpCooldowns = new ConcurrentHashMap<>();
 
     public YatpaCommandHandler(
@@ -59,7 +64,8 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         YatpaConfig config,
         DataStore dataStore,
         RequestService requests,
-        TeleportService teleports
+        TeleportService teleports,
+        SettingsGui settingsGui
     ) {
         this.plugin = plugin;
         this.messages = messages;
@@ -67,6 +73,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         this.dataStore = dataStore;
         this.requests = requests;
         this.teleports = teleports;
+        this.settingsGui = settingsGui;
     }
 
     @Override
@@ -137,6 +144,16 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             showSettings(sender);
             return true;
         }
+        if (args.length == 1 && args[0].equalsIgnoreCase("gui")) {
+            if (!(sender instanceof Player player)) {
+                send(sender, "player_only");
+                return true;
+            }
+            return settingsGui.openFor(player);
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("set")) {
+            return showSetting(sender, args[1]);
+        }
         if (args.length >= 3 && args[0].equalsIgnoreCase("set")) {
             String path = args[1];
             String value = String.join(" ", java.util.Arrays.copyOfRange(args, 2, args.length));
@@ -167,6 +184,9 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             sender.sendMessage("§a/rtp §7- Random teleport");
         }
         sender.sendMessage("§a/spawn §7- Teleport near spawn");
+        if (sender.hasPermission("yatpa.op.reload")) {
+            sender.sendMessage("§a/yatpa gui §7- Open admin settings GUI");
+        }
         appendCostsHelp(sender);
         sender.sendMessage("§6§m-----------------------");
         return true;
@@ -290,6 +310,16 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
     }
 
     private boolean createRequest(Player sender, Player target, RequestType type) {
+        World blocked = null;
+        if (type == RequestType.TPA) {
+            blocked = firstTeleportBlocked(sender.getWorld(), target.getWorld());
+        } else if (type == RequestType.TPAHERE) {
+            blocked = firstTeleportBlocked(target.getWorld(), sender.getWorld());
+        }
+        if (blocked != null) {
+            send(sender, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
+            return true;
+        }
         int remaining = requests.cooldownRemaining(sender.getUniqueId());
         if (remaining > 0) {
             sender.sendMessage(messages.get("prefix") + "Please wait " + remaining + "s before sending another request.");
@@ -302,6 +332,19 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         if (dataStore.isBlocked(target.getUniqueId(), sender.getUniqueId())) {
             send(sender, "you_are_blocked");
             return true;
+        }
+        if (type == RequestType.TPA) {
+            var charge = teleports.previewCharge(sender, TeleportKind.TPA);
+            if (!charge.success()) {
+                send(sender, "cost_failed", Map.of("required", charge.required()));
+                return true;
+            }
+        } else {
+            var charge = teleports.previewCharge(sender, TeleportKind.TPAHERE);
+            if (!charge.success()) {
+                send(sender, "cost_failed", Map.of("required", charge.required()));
+                return true;
+            }
         }
         if (!requests.create(sender.getUniqueId(), target.getUniqueId(), type)) {
             send(sender, "request_exists");
@@ -338,11 +381,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        TeleportRequest request = requests.removeFor(receiver.getUniqueId()).orElse(null);
-        if (request == null) {
-            send(receiver, "request_none");
-            return true;
-        }
+        TeleportRequest request = requestOpt.get();
 
         Player senderPlayer = Bukkit.getPlayer(request.sender());
         if (senderPlayer == null) {
@@ -356,14 +395,42 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                 send(senderPlayer, "request_denied");
                 return true;
             }
-            teleports.queueTeleport(senderPlayer, TeleportKind.TPA, receiver::getLocation);
+            World blocked = firstTeleportBlocked(senderPlayer.getWorld(), receiver.getWorld());
+            if (blocked != null) {
+                send(receiver, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
+                send(senderPlayer, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
+                return true;
+            }
+            var charge = teleports.previewCharge(senderPlayer, TeleportKind.TPA);
+            if (!charge.success()) {
+                send(senderPlayer, "cost_failed", Map.of("required", charge.required()));
+                return true;
+            }
+            requests.removeFor(receiver.getUniqueId());
+            if (!teleports.queueTeleport(senderPlayer, TeleportKind.TPA, receiver::getLocation)) {
+                return true;
+            }
         } else {
             if (!config.tpaHereEnabled()) {
                 send(receiver, "feature_tpahere_disabled");
                 send(senderPlayer, "request_denied");
                 return true;
             }
-            teleports.queueTeleport(receiver, TeleportKind.TPAHERE, senderPlayer::getLocation);
+            World blocked = firstTeleportBlocked(receiver.getWorld(), senderPlayer.getWorld());
+            if (blocked != null) {
+                send(receiver, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
+                send(senderPlayer, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
+                return true;
+            }
+            var charge = teleports.previewCharge(senderPlayer, TeleportKind.TPAHERE);
+            if (!charge.success()) {
+                send(senderPlayer, "cost_failed", Map.of("required", charge.required()));
+                return true;
+            }
+            requests.removeFor(receiver.getUniqueId());
+            if (!teleports.queueTeleport(receiver, TeleportKind.TPAHERE, senderPlayer::getLocation, () -> {}, senderPlayer)) {
+                return true;
+            }
         }
 
         send(receiver, "request_accepted");
@@ -511,6 +578,11 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             send(player, "home_missing", Map.of("name", homeName));
             return true;
         }
+        World blocked = firstTeleportBlocked(player.getWorld(), world);
+        if (blocked != null) {
+            send(player, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
+            return true;
+        }
         Location destination = new Location(world, home.x(), home.y(), home.z(), home.yaw(), home.pitch());
         teleports.queueTeleport(player, TeleportKind.HOME, () -> destination);
         return true;
@@ -523,6 +595,14 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         }
         if (!(sender instanceof Player player)) {
             send(sender, "player_only");
+            return true;
+        }
+        if (config.teleportDisabledIn(player.getWorld())) {
+            send(sender, "teleport_disabled_dimension", Map.of("dimension", player.getWorld().getName()));
+            return true;
+        }
+        if (config.rtpDisabledIn(player.getWorld())) {
+            send(sender, "rtp_disabled_dimension", Map.of("dimension", player.getWorld().getName()));
             return true;
         }
         int remaining = rtpCooldownRemaining(player.getUniqueId());
@@ -545,6 +625,10 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             return true;
         }
         World world = player.getWorld();
+        if (config.teleportDisabledIn(world)) {
+            send(sender, "teleport_disabled_dimension", Map.of("dimension", world.getName()));
+            return true;
+        }
         Location spawn = world.getSpawnLocation();
         int radius = Math.max(0, config.spawnRadius());
         teleports.queueTeleport(player, TeleportKind.SPAWN, () -> findRandomSafe(world, spawn, 0, radius));
@@ -560,10 +644,19 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             send(player, "no_permission");
             return true;
         }
+        if (args.length == 1 && args[0].equalsIgnoreCase("help")) {
+            showYtpHelp(player);
+            return true;
+        }
         if (args.length == 1) {
             Player target = Bukkit.getPlayerExact(args[0]);
             if (target == null) {
                 send(player, "player_not_online");
+                return true;
+            }
+            World blocked = firstTeleportBlocked(player.getWorld(), target.getWorld());
+            if (blocked != null) {
+                send(player, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
                 return true;
             }
             player.teleport(resolveYtpDestination(player, target.getLocation()));
@@ -575,6 +668,14 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             Player target = Bukkit.getPlayerExact(args[1]);
             if (actor == null || target == null) {
                 send(player, "player_not_online");
+                return true;
+            }
+            World blocked = firstTeleportBlocked(actor.getWorld(), target.getWorld());
+            if (blocked != null) {
+                send(player, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
+                if (!actor.getUniqueId().equals(player.getUniqueId())) {
+                    send(actor, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
+                }
                 return true;
             }
             actor.teleport(resolveYtpDestination(actor, target.getLocation()));
@@ -596,6 +697,11 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             World world = args.length == 4 ? resolveRealm(args[3], player.getWorld()) : player.getWorld();
             if (world == null) {
                 player.sendMessage(messages.get("prefix") + "§cUnknown realm/world: §e" + args[3]);
+                return true;
+            }
+            World blocked = firstTeleportBlocked(player.getWorld(), world);
+            if (blocked != null) {
+                send(player, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
                 return true;
             }
 
@@ -622,6 +728,14 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             World world = args.length == 5 ? resolveRealm(args[4], actor.getWorld()) : actor.getWorld();
             if (world == null) {
                 player.sendMessage(messages.get("prefix") + "§cUnknown realm/world: §e" + args[4]);
+                return true;
+            }
+            World blocked = firstTeleportBlocked(actor.getWorld(), world);
+            if (blocked != null) {
+                send(player, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
+                if (!actor.getUniqueId().equals(player.getUniqueId())) {
+                    send(actor, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
+                }
                 return true;
             }
 
@@ -655,6 +769,11 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         Location location = dataStore.offlineLocation(args[0]);
         if (location == null) {
             send(player, "offline_missing");
+            return true;
+        }
+        World blocked = firstTeleportBlocked(player.getWorld(), location.getWorld());
+        if (blocked != null) {
+            send(player, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
             return true;
         }
         player.teleport(location);
@@ -799,6 +918,16 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         return Math.max(min, Math.min(max, value));
     }
 
+    private World firstTeleportBlocked(World source, World destination) {
+        if (config.teleportDisabledIn(source)) {
+            return source;
+        }
+        if (config.teleportDisabledIn(destination)) {
+            return destination;
+        }
+        return null;
+    }
+
     private World resolveRealm(String value, World currentWorld) {
         String input = value.toLowerCase(Locale.ROOT);
         World exact = Bukkit.getWorld(value);
@@ -854,6 +983,17 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         return world.getSpawnLocation();
     }
 
+    private void showYtpHelp(CommandSender sender) {
+        sender.sendMessage("§6§m-----------------------");
+        sender.sendMessage("§e§lYTP Help");
+        sender.sendMessage("§a/ytp <player> §7- Teleport yourself to a player");
+        sender.sendMessage("§a/ytp <player> <target> §7- Teleport player to another player");
+        sender.sendMessage("§a/ytp <x> <y> <z> [realm] §7- Teleport yourself to coordinates");
+        sender.sendMessage("§a/ytp <player> <x> <y> <z> [realm] §7- Teleport player to coordinates");
+        sender.sendMessage("§7Realm can be a world name, or: overworld/nether/end");
+        sender.sendMessage("§6§m-----------------------");
+    }
+
     private void send(CommandSender sender, String key) {
         sender.sendMessage(messages.get("prefix") + messages.get(key));
     }
@@ -885,32 +1025,44 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         }
         if (cmd.equals("yatpa") && sender.hasPermission("yatpa.op.reload")) {
             if (args.length == 1) {
-                return partial(List.of("help", "reload", "settings", "set"), args[0]);
+                return partial(List.of("help", "reload", "settings", "gui", "set"), args[0]);
             }
             if (args.length == 2 && args[0].equalsIgnoreCase("set")) {
                 return partial(editableConfigPaths(), args[1]);
             }
             if (args.length == 3 && args[0].equalsIgnoreCase("set")) {
-                Object current = plugin.getConfig().get(args[1]);
-                if (current instanceof Boolean) {
+                String path = args[1];
+                Object current = plugin.getConfig().get(path);
+                if (isBooleanPath(path) || current instanceof Boolean) {
                     return partial(List.of("true", "false"), args[2]);
                 }
-                if (current != null && args[1].equalsIgnoreCase("settings.landing.mode")) {
+                if (isLandingModePath(path)) {
                     return partial(List.of("EXACT", "RANDOM_OFFSET"), args[2]);
                 }
-                if (current != null && args[1].equalsIgnoreCase("settings.costs.mode")) {
+                if (isCostModePath(path)) {
                     return partial(List.of("NONE", "XP_LEVELS", "ITEM"), args[2]);
+                }
+                if (isMaterialPath(path)) {
+                    return partial(Arrays.stream(Material.values()).map(Material::name).collect(Collectors.toList()), args[2].toUpperCase(Locale.ROOT));
+                }
+                if (isSoundPath(path)) {
+                    return partial(Arrays.stream(Sound.values()).map(Sound::name).collect(Collectors.toList()), args[2].toUpperCase(Locale.ROOT));
+                }
+                if (isEffectPath(path)) {
+                    return partial(Arrays.stream(Particle.values()).map(Particle::name).collect(Collectors.toList()), args[2].toUpperCase(Locale.ROOT));
                 }
             }
         }
 
         if (cmd.equals("yatpa") && args.length == 1) {
-            return partial(List.of("help"), args[0]);
+            return partial(List.of("help", "gui"), args[0]);
         }
 
         if (cmd.equals("ytp")) {
             if (args.length == 1) {
-                return partial(onlineNames(), args[0]);
+                List<String> first = new ArrayList<>(onlineNames());
+                first.add("help");
+                return partial(first, args[0]);
             }
             if (args.length == 2 && !isCoordinateToken(args[0])) {
                 return partial(onlineNames(), args[1]);
@@ -987,7 +1139,9 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             path.startsWith("settings.rtp.realm_min_distance.") ||
             path.startsWith("settings.rtp.realm_max_distance.") ||
             path.startsWith("settings.costs.xp_levels.rtp.") ||
-            path.startsWith("settings.costs.item.rtp.");
+            path.startsWith("settings.costs.item.rtp.") ||
+            path.startsWith("settings.dimension_restrictions.disable_rtp.") ||
+            path.startsWith("settings.dimension_restrictions.disable_teleport.");
 
         if (!plugin.getConfig().contains(path) && !FEATURE_PATHS.contains(path) && !dynamicAllowed) {
             sender.sendMessage(messages.get("prefix") + "§cUnknown setting path: §e" + path);
@@ -999,22 +1153,24 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             return true;
         }
 
+        maybeMigrateGlobalRtpCostToRealm(path);
+
         Object current = plugin.getConfig().get(path);
-        if (current == null) {
-            if (FEATURE_PATHS.contains(path)) {
-                current = Boolean.TRUE; // feature toggles default to boolean
-            } else if (
-                path.startsWith("settings.rtp.realm_min_distance.") ||
-                path.startsWith("settings.rtp.realm_max_distance.") ||
-                path.startsWith("settings.costs.xp_levels.rtp.") ||
-                path.startsWith("settings.costs.item.rtp.")
-            ) {
-                current = Integer.valueOf(0); // treat as integer when not present
-            }
+        if (isBooleanPath(path)) {
+            current = Boolean.FALSE;
+        } else if (
+            path.startsWith("settings.rtp.realm_min_distance.") ||
+            path.startsWith("settings.rtp.realm_max_distance.") ||
+            path.startsWith("settings.costs.xp_levels.rtp.") ||
+            path.startsWith("settings.costs.item.rtp.")
+        ) {
+            current = Integer.valueOf(0);
+        } else if (current == null && FEATURE_PATHS.contains(path)) {
+            current = Boolean.TRUE;
         }
-        Object parsed = parseValue(current, value);
+        Object parsed = parseSettingValue(path, current, value);
         if (parsed == null && current != null) {
-            sender.sendMessage(messages.get("prefix") + "§cInvalid value type. Current type: §e" + current.getClass().getSimpleName());
+            sender.sendMessage(messages.get("prefix") + "§cInvalid value for §e" + path + "§c. Expected: §e" + expectedType(path, current));
             return true;
         }
 
@@ -1023,6 +1179,51 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         plugin.reloadAll();
 
         sender.sendMessage(messages.get("prefix") + "§aUpdated §e" + path + " §ato §b" + value);
+        return true;
+    }
+
+    private void maybeMigrateGlobalRtpCostToRealm(String path) {
+        if (path.startsWith("settings.costs.item.rtp.")) {
+            migrateGlobalRtpCostToRealm("settings.costs.item.rtp");
+        } else if (path.startsWith("settings.costs.xp_levels.rtp.")) {
+            migrateGlobalRtpCostToRealm("settings.costs.xp_levels.rtp");
+        }
+    }
+
+    private void migrateGlobalRtpCostToRealm(String basePath) {
+        if (!plugin.getConfig().isInt(basePath)) {
+            return;
+        }
+        int global = plugin.getConfig().getInt(basePath);
+        plugin.getConfig().set(basePath + ".overworld", global);
+        plugin.getConfig().set(basePath + ".nether", global);
+        plugin.getConfig().set(basePath + ".end", global);
+    }
+
+    private boolean showSetting(CommandSender sender, String path) {
+        boolean dynamicAllowed =
+            path.startsWith("settings.rtp.realm_min_distance.") ||
+            path.startsWith("settings.rtp.realm_max_distance.") ||
+            path.startsWith("settings.costs.xp_levels.rtp.") ||
+            path.startsWith("settings.costs.item.rtp.") ||
+            path.startsWith("settings.dimension_restrictions.disable_rtp.") ||
+            path.startsWith("settings.dimension_restrictions.disable_teleport.");
+        if (!plugin.getConfig().contains(path) && !FEATURE_PATHS.contains(path) && !dynamicAllowed) {
+            sender.sendMessage(messages.get("prefix") + "§cUnknown setting path: §e" + path);
+            sender.sendMessage(messages.get("prefix") + "§7Try: §f/yatpa settings");
+            return true;
+        }
+        Object value = plugin.getConfig().get(path);
+        if (value == null) {
+            if (isBooleanPath(path)) {
+                value = false;
+            } else if (isIntegerPath(path)) {
+                value = 0;
+            } else {
+                value = "<unset>";
+            }
+        }
+        sender.sendMessage(messages.get("prefix") + "§e" + path + " §7= §b" + value);
         return true;
     }
 
@@ -1067,6 +1268,96 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         return value;
     }
 
+    private Object parseSettingValue(String path, Object current, String value) {
+        String raw = value.trim();
+        if (isBooleanPath(path)) {
+            if (!raw.equalsIgnoreCase("true") && !raw.equalsIgnoreCase("false")) {
+                return null;
+            }
+            return Boolean.parseBoolean(raw);
+        }
+        if (isIntegerPath(path)) {
+            try {
+                return Integer.parseInt(raw);
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        if (isCostModePath(path)) {
+            try {
+                return YatpaConfig.CostMode.valueOf(raw.toUpperCase(Locale.ROOT)).name();
+            } catch (IllegalArgumentException ignored) {
+                return null;
+            }
+        }
+        if (isLandingModePath(path)) {
+            try {
+                return YatpaConfig.LandingMode.valueOf(raw.toUpperCase(Locale.ROOT)).name();
+            } catch (IllegalArgumentException ignored) {
+                return null;
+            }
+        }
+        if (isMaterialPath(path)) {
+            try {
+                return Material.valueOf(raw.toUpperCase(Locale.ROOT)).name();
+            } catch (IllegalArgumentException ignored) {
+                return null;
+            }
+        }
+        if (isSoundPath(path)) {
+            try {
+                return Sound.valueOf(raw.toUpperCase(Locale.ROOT)).name();
+            } catch (IllegalArgumentException ignored) {
+                return null;
+            }
+        }
+        if (isEffectPath(path)) {
+            try {
+                return Particle.valueOf(raw.toUpperCase(Locale.ROOT)).name();
+            } catch (IllegalArgumentException ignored) {
+                return null;
+            }
+        }
+        return parseValue(current, value);
+    }
+
+    private String expectedType(String path, Object current) {
+        if (isBooleanPath(path)) return "true/false";
+        if (isIntegerPath(path)) return "integer";
+        if (isCostModePath(path)) return "NONE|XP_LEVELS|ITEM";
+        if (isLandingModePath(path)) return "EXACT|RANDOM_OFFSET";
+        if (isMaterialPath(path)) return "Minecraft material name";
+        if (isSoundPath(path)) return "Bukkit sound enum name";
+        if (isEffectPath(path)) return "Bukkit particle enum name";
+        return current == null ? "string" : current.getClass().getSimpleName();
+    }
+
+    private boolean isBooleanPath(String path) {
+        return path.startsWith("settings.features.")
+            || path.startsWith("settings.dimension_restrictions.disable_rtp.")
+            || path.startsWith("settings.dimension_restrictions.disable_teleport.")
+            || path.equals("settings.cancel_on_move")
+            || path.equals("settings.cancel_on_damage")
+            || path.equals("settings.costs.enabled");
+    }
+
+    private boolean isIntegerPath(String path) {
+        return path.endsWith("_seconds")
+            || path.endsWith("_radius")
+            || path.endsWith("_distance")
+            || path.endsWith("_offset")
+            || path.contains(".costs.xp_levels.")
+            || (path.contains(".costs.item.") && !path.equals("settings.costs.item.material"))
+            || path.contains(".realm_min_distance.")
+            || path.contains(".realm_max_distance.");
+    }
+
+    private boolean isCostModePath(String path) { return path.equals("settings.costs.mode"); }
+    private boolean isLandingModePath(String path) { return path.equals("settings.landing.mode"); }
+    private boolean isMaterialPath(String path) { return path.equals("settings.costs.item.material"); }
+    private boolean isSoundPath(String path) { return path.startsWith("sounds."); }
+    private boolean isEffectPath(String path) { return path.startsWith("effects."); }
+
     private void showSettings(CommandSender sender) {
         sender.sendMessage("§6§m-----------------------");
         sender.sendMessage("§e§lYATPA Settings");
@@ -1091,7 +1382,13 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             "settings.rtp.realm_min_distance.end",
             "settings.rtp.realm_max_distance.overworld",
             "settings.rtp.realm_max_distance.nether",
-            "settings.rtp.realm_max_distance.end"
+            "settings.rtp.realm_max_distance.end",
+            "settings.dimension_restrictions.disable_rtp.overworld",
+            "settings.dimension_restrictions.disable_rtp.nether",
+            "settings.dimension_restrictions.disable_rtp.end",
+            "settings.dimension_restrictions.disable_teleport.overworld",
+            "settings.dimension_restrictions.disable_teleport.nether",
+            "settings.dimension_restrictions.disable_teleport.end"
         );
         return java.util.stream.Stream.of(
                 plugin.getConfig().getKeys(true).stream(),

@@ -14,6 +14,10 @@ import org.w3c.dom.NodeList;
 
 public class XmlMessages {
     private final Map<String, String> messages = new HashMap<>();
+    private static final Map<String, String> BUILTIN_FALLBACKS = Map.of(
+        "teleport_disabled_dimension", "&cTeleporting is disabled in this dimension (%dimension%).",
+        "rtp_disabled_dimension", "&cRandom teleport is disabled in this dimension (%dimension%)."
+    );
 
     public void load(File file) {
         messages.clear();
@@ -36,7 +40,15 @@ public class XmlMessages {
     }
 
     public String get(String key) {
-        return messages.getOrDefault(key, key);
+        String value = messages.get(key);
+        if (value != null) {
+            return value;
+        }
+        String fallback = BUILTIN_FALLBACKS.get(key);
+        if (fallback != null) {
+            return ChatColor.translateAlternateColorCodes('&', fallback);
+        }
+        return key;
     }
 
     public String format(String key, Map<String, String> replacements) {

@@ -3,6 +3,7 @@ package dev.yatpa.paper;
 import dev.yatpa.paper.command.YatpaCommandHandler;
 import dev.yatpa.paper.config.XmlMessages;
 import dev.yatpa.paper.config.YatpaConfig;
+import dev.yatpa.paper.gui.SettingsGui;
 import dev.yatpa.paper.listener.PlayerEventListener;
 import dev.yatpa.paper.service.CostService;
 import dev.yatpa.paper.service.DataStore;
@@ -47,7 +48,8 @@ public class YatpaPaperPlugin extends JavaPlugin {
         this.requests = new RequestService(configModel.requestTimeoutSeconds(), configModel.requestCooldownSeconds());
         this.teleports = new TeleportService(this, configModel, messages, new CostService(configModel));
 
-        YatpaCommandHandler handler = new YatpaCommandHandler(this, messages, configModel, dataStore, requests, teleports);
+        SettingsGui settingsGui = new SettingsGui(this, messages);
+        YatpaCommandHandler handler = new YatpaCommandHandler(this, messages, configModel, dataStore, requests, teleports, settingsGui);
         for (String command : new String[]{"tpa", "yatpa", "tpahelp", "tphelp", "tpahere", "tpaccept", "tpdeny", "tpatoggle", "tpablock", "tpaunblock", "tphome", "rtp", "spawn", "ytp", "tpoffline"}) {
             PluginCommand pluginCommand = getCommand(command);
             if (pluginCommand != null) {
@@ -57,6 +59,7 @@ public class YatpaPaperPlugin extends JavaPlugin {
         }
 
         getServer().getPluginManager().registerEvents(new PlayerEventListener(teleports, dataStore), this);
+        getServer().getPluginManager().registerEvents(settingsGui, this);
         getServer().getScheduler().runTaskTimer(this, () -> {
             for (var expired : requests.purgeExpired()) {
                 String receiverName = Bukkit.getOfflinePlayer(expired.receiver()).getName();
@@ -92,6 +95,12 @@ public class YatpaPaperPlugin extends JavaPlugin {
         changed |= ensureDefault(cfg, "settings.features.tpahere", true);
         changed |= ensureDefault(cfg, "settings.features.homes", true);
         changed |= ensureDefault(cfg, "settings.features.rtp", true);
+        changed |= ensureDefault(cfg, "settings.dimension_restrictions.disable_rtp.overworld", false);
+        changed |= ensureDefault(cfg, "settings.dimension_restrictions.disable_rtp.nether", false);
+        changed |= ensureDefault(cfg, "settings.dimension_restrictions.disable_rtp.end", false);
+        changed |= ensureDefault(cfg, "settings.dimension_restrictions.disable_teleport.overworld", false);
+        changed |= ensureDefault(cfg, "settings.dimension_restrictions.disable_teleport.nether", false);
+        changed |= ensureDefault(cfg, "settings.dimension_restrictions.disable_teleport.end", false);
         if (changed) {
             saveConfig();
         }

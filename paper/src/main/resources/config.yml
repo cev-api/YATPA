@@ -26,6 +26,14 @@ settings:
       # overworld: 3000
       # nether: 1500
       # end: 4000
+  dimension_restrictions:
+    # Set a dimension/world key to true to disable that behavior in that dimension.
+    # You can use world names (example: world_nether), realms (overworld/nether/end),
+    # or namespaced ids (example: "minecraft:the_nether").
+    disable_rtp:
+      # nether: true
+    disable_teleport:
+      # minecraft:the_end: true
   landing:
     mode: EXACT # EXACT or RANDOM_OFFSET
     random_offset_max: 4

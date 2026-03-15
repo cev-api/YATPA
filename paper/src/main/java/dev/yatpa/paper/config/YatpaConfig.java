@@ -2,7 +2,10 @@ package dev.yatpa.paper.config;
 
 import dev.yatpa.paper.data.TeleportKind;
 import java.util.EnumMap;
+import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
@@ -48,6 +51,8 @@ public class YatpaConfig {
     private final Map<String, Integer> realmItemRtpCosts;
     private final Map<String, Map<TeleportKind, Integer>> xpCostsByWorld;
     private final Map<String, Map<TeleportKind, Integer>> itemCostsByWorld;
+    private final Set<String> rtpDisabledDimensions;
+    private final Set<String> teleportDisabledDimensions;
     private final Map<String, Sound> sounds;
     private final Map<String, Particle> effects;
 
@@ -81,7 +86,9 @@ public class YatpaConfig {
         Map<String, Integer> realmXpRtpCosts,
         Map<String, Integer> realmItemRtpCosts,
         Map<String, Integer> realmRtpMin,
-        Map<String, Integer> realmRtpMax
+        Map<String, Integer> realmRtpMax,
+        Set<String> rtpDisabledDimensions,
+        Set<String> teleportDisabledDimensions
     ) {
         this.maxHomesDefault = maxHomesDefault;
         this.requestTimeoutSeconds = requestTimeoutSeconds;
@@ -111,6 +118,8 @@ public class YatpaConfig {
         this.realmItemRtpCosts = realmItemRtpCosts != null ? realmItemRtpCosts : new java.util.HashMap<>();
         this.realmRtpMin = realmRtpMin != null ? realmRtpMin : new java.util.HashMap<>();
         this.realmRtpMax = realmRtpMax != null ? realmRtpMax : new java.util.HashMap<>();
+        this.rtpDisabledDimensions = rtpDisabledDimensions != null ? rtpDisabledDimensions : new HashSet<>();
+        this.teleportDisabledDimensions = teleportDisabledDimensions != null ? teleportDisabledDimensions : new HashSet<>();
         this.sounds = sounds;
         this.effects = effects;
     }
@@ -124,6 +133,8 @@ public class YatpaConfig {
         Map<String, Integer> realmItemRtp = new java.util.HashMap<>();
         Map<String, Integer> realmMin = new java.util.HashMap<>();
         Map<String, Integer> realmMax = new java.util.HashMap<>();
+        Set<String> blockedRtp = parseDimensionRestrictions(config, "settings.dimension_restrictions.disable_rtp");
+        Set<String> blockedTeleport = parseDimensionRestrictions(config, "settings.dimension_restrictions.disable_teleport");
         for (TeleportKind kind : TeleportKind.values()) {
             String key = kind.name().toLowerCase();
             xp.put(kind, config.getInt("settings.costs.xp_levels." + key, 0));
@@ -216,8 +227,71 @@ public class YatpaConfig {
             realmXpRtp,
             realmItemRtp,
             realmMin,
-            realmMax
+            realmMax,
+            blockedRtp,
+            blockedTeleport
         );
+    }
+
+    private static Set<String> parseDimensionRestrictions(FileConfiguration config, String rootPath) {
+        Set<String> values = new HashSet<>();
+        for (String value : config.getStringList(rootPath)) {
+            String normalized = normalizeDimension(value);
+            if (!normalized.isEmpty()) {
+                values.add(normalized);
+            }
+        }
+        String single = config.getString(rootPath);
+        if (single != null && !single.isBlank()) {
+            for (String part : single.split(",")) {
+                String normalized = normalizeDimension(part);
+                if (!normalized.isEmpty()) {
+                    values.add(normalized);
+                }
+            }
+        }
+        String prefix = rootPath + ".";
+        for (String key : config.getKeys(true)) {
+            if (!key.startsWith(prefix)) {
+                continue;
+            }
+            if (!config.getBoolean(key, false)) {
+                continue;
+            }
+            String normalized = normalizeDimension(key.substring(prefix.length()));
+            if (!normalized.isEmpty()) {
+                values.add(normalized);
+            }
+        }
+        return values;
+    }
+
+    private static String normalizeDimension(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private boolean worldMatchesRestriction(org.bukkit.World world, Set<String> restrictions) {
+        if (world == null || restrictions.isEmpty()) {
+            return false;
+        }
+        String worldName = normalizeDimension(world.getName());
+        if (restrictions.contains(worldName)) {
+            return true;
+        }
+        String worldKey = normalizeDimension(world.getKey().toString());
+        if (restrictions.contains(worldKey)) {
+            return true;
+        }
+        String realm = switch (world.getEnvironment()) {
+            case NORMAL -> "overworld";
+            case NETHER -> "nether";
+            case THE_END -> "end";
+            default -> "";
+        };
+        return !realm.isEmpty() && restrictions.contains(realm);
     }
 
     public int xpCost(TeleportKind kind, org.bukkit.World world) {
@@ -327,6 +401,8 @@ public class YatpaConfig {
         };
         return realmRtpMax.getOrDefault(env, rtpMaxDistance);
     }
+    public boolean rtpDisabledIn(org.bukkit.World world) { return worldMatchesRestriction(world, rtpDisabledDimensions); }
+    public boolean teleportDisabledIn(org.bukkit.World world) { return worldMatchesRestriction(world, teleportDisabledDimensions); }
     public LandingMode landingMode() { return landingMode; }
     public int landingRandomOffset() { return landingRandomOffset; }
     public boolean appEnabled() { return appEnabled; }

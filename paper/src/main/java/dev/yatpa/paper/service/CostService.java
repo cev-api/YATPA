@@ -22,6 +22,14 @@ public class CostService {
     }
 
     public ChargeResult charge(Player player, TeleportKind kind) {
+        return assess(player, kind, true);
+    }
+
+    public ChargeResult preview(Player player, TeleportKind kind) {
+        return assess(player, kind, false);
+    }
+
+    private ChargeResult assess(Player player, TeleportKind kind, boolean deduct) {
         if (!config.costsEnabled() || config.costMode() == YatpaConfig.CostMode.NONE) {
             return ChargeResult.ok();
         }
@@ -33,7 +41,9 @@ public class CostService {
             if (player.getLevel() < cost) {
                 return ChargeResult.fail(cost + " XP level" + (cost == 1 ? "" : "s"));
             }
-            player.setLevel(player.getLevel() - cost);
+            if (deduct) {
+                player.setLevel(player.getLevel() - cost);
+            }
             return ChargeResult.okPaid(cost + " XP level" + (cost == 1 ? "" : "s"));
         }
         int amount = config.itemCost(kind, player.getWorld());
@@ -54,7 +64,9 @@ public class CostService {
         if (remaining > 0) {
             return ChargeResult.fail(amount + " " + itemDisplayName(config.costItem().name()));
         }
-        player.getInventory().removeItem(new ItemStack(config.costItem(), amount));
+        if (deduct) {
+            player.getInventory().removeItem(new ItemStack(config.costItem(), amount));
+        }
         return ChargeResult.okPaid(amount + " " + itemDisplayName(config.costItem().name()));
     }
 

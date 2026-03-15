@@ -126,9 +126,11 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                 .then(Commands.literal("set")
                     .requires(src -> src.hasPermission(2))
                     .then(Commands.argument("path", StringArgumentType.word())
+                        .executes(this::showSetting)
                         .then(Commands.argument("value", StringArgumentType.greedyString()).executes(this::setSetting)))));
             d.register(Commands.literal("ytp")
                 .requires(src -> src.hasPermission(2))
+                .then(Commands.literal("help").executes(this::opYtpHelp))
                 .then(Commands.argument("player", EntityArgument.player())
                     .executes(this::opYtpPlayer)
                     .then(Commands.argument("target", EntityArgument.player()).executes(this::opYtpPlayerToPlayer))
@@ -202,10 +204,31 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             }
             pending.ticksLeft--;
             if (pending.ticksLeft <= 0) {
-                teleport(player, pending.targetSupplier.get());
-                pending.onSuccess.run();
-                send(player, "teleport_success");
-                play(player, "success");
+                ServerPlayer payer = minecraftServer.getPlayerList().getPlayer(pending.payerId);
+                if (payer == null) {
+                    sendRaw(player, "Teleport cancelled because payment could not be collected.");
+                    finished.add(entry.getKey());
+                    continue;
+                }
+                ChargeResult charge = charge(payer, pending.kind);
+                if (!charge.success) {
+                    String template = messages.getOrDefault("cost_failed", "cost_failed");
+                    if (!template.contains("%required%")) {
+                        sendRaw(payer, "You require " + charge.required + " to teleport.");
+                    } else {
+                        send(payer, "cost_failed", Map.of("required", charge.required));
+                    }
+                    finished.add(entry.getKey());
+                    continue;
+                }
+                if (charge.paid != null && !charge.paid.isBlank()) {
+                    sendRaw(payer, "Paid " + charge.paid + ".");
+                }
+                if (teleport(player, pending.targetSupplier.get())) {
+                    pending.onSuccess.run();
+                    send(player, "teleport_success");
+                    play(player, "success");
+                }
                 finished.add(entry.getKey());
             }
         }
@@ -371,12 +394,24 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
     private int setSetting(CommandContext<CommandSourceStack> ctx) {
         String path = StringArgumentType.getString(ctx, "path");
         String value = StringArgumentType.getString(ctx, "value");
-        if (!rawConfig.containsKey(path) && !FEATURE_PATHS.contains(path) && !defaultConfigValues().containsKey(path)) {
+        boolean dynamicAllowed =
+            path.startsWith("settings.rtp.default_min_distance.") ||
+            path.startsWith("settings.rtp.default_max_distance.") ||
+            path.startsWith("settings.costs.xp_levels.rtp.") ||
+            path.startsWith("settings.costs.item.rtp.") ||
+            path.startsWith("settings.dimension_restrictions.disable_rtp.") ||
+            path.startsWith("settings.dimension_restrictions.disable_teleport.");
+        if (!rawConfig.containsKey(path) && !FEATURE_PATHS.contains(path) && !defaultConfigValues().containsKey(path) && !dynamicAllowed) {
             sendRaw(ctx.getSource(), "Unknown setting path: " + path);
             sendRaw(ctx.getSource(), "Try: /yatpa settings");
             return 0;
         }
-        rawConfig.setProperty(path, value);
+        String normalized = normalizeSettingValue(path, value);
+        if (normalized == null) {
+            sendRaw(ctx.getSource(), "Invalid value for " + path + ". Expected " + expectedTypeName(path) + ".");
+            return 0;
+        }
+        rawConfig.setProperty(path, normalized);
         try {
             saveConfigProperties();
             loadConfig(runtimeConfigPath);
@@ -384,8 +419,144 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             sendRaw(ctx.getSource(), "Failed to save config: " + e.getMessage());
             return 0;
         }
-        sendRaw(ctx.getSource(), "Updated " + path + " to " + value);
+        sendRaw(ctx.getSource(), "Updated " + path + " to " + normalized);
         return Command.SINGLE_SUCCESS;
+    }
+
+    private int showSetting(CommandContext<CommandSourceStack> ctx) {
+        String path = StringArgumentType.getString(ctx, "path");
+        boolean dynamicAllowed =
+            path.startsWith("settings.rtp.default_min_distance.") ||
+            path.startsWith("settings.rtp.default_max_distance.") ||
+            path.startsWith("settings.costs.xp_levels.rtp.") ||
+            path.startsWith("settings.costs.item.rtp.") ||
+            path.startsWith("settings.dimension_restrictions.disable_rtp.") ||
+            path.startsWith("settings.dimension_restrictions.disable_teleport.");
+        if (!rawConfig.containsKey(path) && !FEATURE_PATHS.contains(path) && !defaultConfigValues().containsKey(path) && !dynamicAllowed) {
+            sendRaw(ctx.getSource(), "Unknown setting path: " + path);
+            sendRaw(ctx.getSource(), "Try: /yatpa settings");
+            return 0;
+        }
+        String current = rawConfig.getProperty(path);
+        if (current == null) {
+            if (isBooleanPath(path)) {
+                current = "false";
+            } else if (isIntegerPath(path)) {
+                current = "0";
+            } else if (isCostModePath(path)) {
+                current = "NONE";
+            } else if (isLandingModePath(path)) {
+                current = "EXACT";
+            } else if (isMaterialPath(path)) {
+                current = "ENDER_PEARL";
+            } else {
+                current = "<unset>";
+            }
+        }
+        sendRaw(ctx.getSource(), path + " = " + current);
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private String expectedTypeName(String path) {
+        if (isBooleanPath(path)) {
+            return "boolean (true/false)";
+        }
+        if (isIntegerPath(path)) {
+            return "integer";
+        }
+        return "string";
+    }
+
+    private boolean isBooleanPath(String path) {
+        return path.startsWith("settings.features.")
+            || path.startsWith("settings.dimension_restrictions.disable_rtp.")
+            || path.startsWith("settings.dimension_restrictions.disable_teleport.")
+            || path.equals("settings.cancel_on_move")
+            || path.equals("settings.cancel_on_damage")
+            || path.equals("settings.costs.enabled");
+    }
+
+    private boolean isIntegerPath(String path) {
+        return path.endsWith("_seconds")
+            || path.endsWith("_radius")
+            || path.endsWith("_distance")
+            || path.endsWith("_offset")
+            || path.contains(".costs.xp_levels.")
+            || (path.contains(".costs.item.") && !path.equals("settings.costs.item.material"))
+            || path.contains(".realm_min_distance.")
+            || path.contains(".realm_max_distance.");
+    }
+
+    private boolean isCostModePath(String path) { return path.equals("settings.costs.mode"); }
+    private boolean isLandingModePath(String path) { return path.equals("settings.landing.mode"); }
+    private boolean isMaterialPath(String path) { return path.equals("settings.costs.item.material"); }
+    private boolean isSoundPath(String path) { return path.startsWith("sounds."); }
+    private boolean isEffectPath(String path) { return path.startsWith("effects."); }
+
+    private String normalizeSettingValue(String path, String rawValue) {
+        String value = rawValue.trim();
+        if (isBooleanPath(path)) {
+            if (!value.equalsIgnoreCase("true") && !value.equalsIgnoreCase("false")) {
+                return null;
+            }
+            return String.valueOf(Boolean.parseBoolean(value));
+        }
+        if (isIntegerPath(path)) {
+            try {
+                return String.valueOf(Integer.parseInt(value));
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        if (isCostModePath(path)) {
+            String upper = value.toUpperCase(Locale.ROOT);
+            if (!upper.equals("NONE") && !upper.equals("XP_LEVELS") && !upper.equals("ITEM")) {
+                return null;
+            }
+            return upper;
+        }
+        if (isLandingModePath(path)) {
+            String upper = value.toUpperCase(Locale.ROOT);
+            if (!upper.equals("EXACT") && !upper.equals("RANDOM_OFFSET")) {
+                return null;
+            }
+            return upper;
+        }
+        if (isMaterialPath(path)) {
+            String upper = value.toUpperCase(Locale.ROOT);
+            String idText = upper.toLowerCase(Locale.ROOT);
+            if (!idText.contains(":")) {
+                idText = "minecraft:" + idText;
+            }
+            try {
+                ResourceLocation id = ResourceLocation.tryParse(idText);
+                if (id == null || BuiltInRegistries.ITEM.getOptional(id).isEmpty()) return null;
+            } catch (Exception ignored) {
+                return null;
+            }
+            return upper;
+        }
+        if (isSoundPath(path)) {
+            String upper = value.toUpperCase(Locale.ROOT);
+            try {
+                SoundEvent s = Config.parseSound(upper);
+                if (s == null) return null;
+            } catch (Exception ignored) {
+                return null;
+            }
+            return upper;
+        }
+        if (isEffectPath(path)) {
+            String upper = value.toUpperCase(Locale.ROOT);
+            try {
+                ParticleOptions p = Config.parseParticle(upper);
+                if (p == null) return null;
+            } catch (Exception ignored) {
+                return null;
+            }
+            return upper;
+        }
+        return value;
     }
 
     private List<String> editableConfigPaths() {
@@ -423,6 +594,16 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             send(sender, "self_target");
             return 0;
         }
+        ServerLevel blocked = null;
+        if (type == RequestType.TPA) {
+            blocked = firstBlockedTeleportLevel(sender.serverLevel(), target.serverLevel());
+        } else if (type == RequestType.TPAHERE) {
+            blocked = firstBlockedTeleportLevel(target.serverLevel(), sender.serverLevel());
+        }
+        if (blocked != null) {
+            send(sender, "teleport_disabled_dimension", Map.of("dimension", blocked.dimension().location().toString()));
+            return 0;
+        }
 
         int cooldown = cooldownRemaining(sender.getUUID());
         if (cooldown > 0) {
@@ -438,6 +619,19 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         if (prefs.blocked.contains(sender.getUUID().toString())) {
             send(sender, "you_are_blocked");
             return 0;
+        }
+        if (type == RequestType.TPA) {
+            ChargeResult charge = previewCharge(sender, TeleportKind.TPA);
+            if (!charge.success) {
+                send(sender, "cost_failed", Map.of("required", charge.required));
+                return 0;
+            }
+        } else {
+            ChargeResult charge = previewCharge(sender, TeleportKind.TPAHERE);
+            if (!charge.success) {
+                send(sender, "cost_failed", Map.of("required", charge.required));
+                return 0;
+            }
         }
         Request existing = pendingByReceiver.get(target.getUUID());
         if (existing != null && existing.sender.equals(sender.getUUID())) {
@@ -484,7 +678,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             return 0;
         }
 
-        Request request = pendingByReceiver.remove(receiver.getUUID());
+        Request request = pendingByReceiver.get(receiver.getUUID());
         if (request == null) {
             send(receiver, "request_none");
             return 0;
@@ -503,6 +697,18 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                 send(sender, "request_denied");
                 return 0;
             }
+            ServerLevel blocked = firstBlockedTeleportLevel(sender.serverLevel(), receiver.serverLevel());
+            if (blocked != null) {
+                send(receiver, "teleport_disabled_dimension", Map.of("dimension", blocked.dimension().location().toString()));
+                send(sender, "teleport_disabled_dimension", Map.of("dimension", blocked.dimension().location().toString()));
+                return 0;
+            }
+            ChargeResult charge = previewCharge(sender, TeleportKind.TPA);
+            if (!charge.success) {
+                send(sender, "cost_failed", Map.of("required", charge.required));
+                return 0;
+            }
+            pendingByReceiver.remove(receiver.getUUID());
             queueDelayedTeleport(sender, TeleportKind.TPA, () -> receiver.serverLevel(), () -> receiver.position().x, () -> receiver.position().y, () -> receiver.position().z, sender.getYRot(), sender.getXRot());
         } else {
             if (!config.tpaHereEnabled) {
@@ -510,7 +716,19 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                 send(sender, "request_denied");
                 return 0;
             }
-            queueDelayedTeleport(receiver, TeleportKind.TPAHERE, () -> sender.serverLevel(), () -> sender.position().x, () -> sender.position().y, () -> sender.position().z, receiver.getYRot(), receiver.getXRot());
+            ServerLevel blocked = firstBlockedTeleportLevel(receiver.serverLevel(), sender.serverLevel());
+            if (blocked != null) {
+                send(receiver, "teleport_disabled_dimension", Map.of("dimension", blocked.dimension().location().toString()));
+                send(sender, "teleport_disabled_dimension", Map.of("dimension", blocked.dimension().location().toString()));
+                return 0;
+            }
+            ChargeResult charge = previewCharge(sender, TeleportKind.TPAHERE);
+            if (!charge.success) {
+                send(sender, "cost_failed", Map.of("required", charge.required));
+                return 0;
+            }
+            pendingByReceiver.remove(receiver.getUUID());
+            queueDelayedTeleport(receiver, sender, TeleportKind.TPAHERE, () -> sender.serverLevel(), () -> sender.position().x, () -> sender.position().y, () -> sender.position().z, receiver.getYRot(), receiver.getXRot());
         }
 
         send(receiver, "request_accepted");
@@ -610,8 +828,21 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             return 0;
         }
         TeleportTarget destination = resolveYtpTarget(source, target.serverLevel(), target.getX(), target.getY(), target.getZ(), source.getYRot(), source.getXRot());
-        teleport(source, destination);
-        send(source, "teleport_success");
+        if (teleport(source, destination)) {
+            send(source, "teleport_success");
+        }
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private int opYtpHelp(CommandContext<CommandSourceStack> ctx) {
+        sendRaw(ctx.getSource(), "-----------------------");
+        sendRaw(ctx.getSource(), "YTP Help");
+        sendRaw(ctx.getSource(), "/ytp <player> - Teleport yourself to a player");
+        sendRaw(ctx.getSource(), "/ytp <player> <target> - Teleport player to another player");
+        sendRaw(ctx.getSource(), "/ytp <x> <y> <z> [realm] - Teleport yourself to coordinates");
+        sendRaw(ctx.getSource(), "/ytp <player> <x> <y> <z> [realm] - Teleport player to coordinates");
+        sendRaw(ctx.getSource(), "Realm can be a world/dimension id, or: overworld/nether/end");
+        sendRaw(ctx.getSource(), "-----------------------");
         return Command.SINGLE_SUCCESS;
     }
 
@@ -634,10 +865,11 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             return 0;
         }
         TeleportTarget destination = resolveYtpTarget(actor, target.serverLevel(), target.getX(), target.getY(), target.getZ(), actor.getYRot(), actor.getXRot());
-        teleport(actor, destination);
-        send(source, "teleport_success");
-        if (!source.getUUID().equals(actor.getUUID())) {
-            send(actor, "teleport_success");
+        if (teleport(actor, destination)) {
+            send(source, "teleport_success");
+            if (!source.getUUID().equals(actor.getUUID())) {
+                send(actor, "teleport_success");
+            }
         }
         return Command.SINGLE_SUCCESS;
     }
@@ -730,17 +962,19 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
 
     private int teleportToCoordinates(ServerPlayer player, double x, double y, double z, ServerLevel level) {
         TeleportTarget destination = resolveYtpTarget(player, level, x, y, z, player.getYRot(), player.getXRot());
-        teleport(player, destination);
-        send(player, "teleport_success");
+        if (teleport(player, destination)) {
+            send(player, "teleport_success");
+        }
         return Command.SINGLE_SUCCESS;
     }
 
     private int teleportPlayerToCoordinates(ServerPlayer source, ServerPlayer actor, double x, double y, double z, ServerLevel level) {
         TeleportTarget destination = resolveYtpTarget(actor, level, x, y, z, actor.getYRot(), actor.getXRot());
-        teleport(actor, destination);
-        send(source, "teleport_success");
-        if (!source.getUUID().equals(actor.getUUID())) {
-            send(actor, "teleport_success");
+        if (teleport(actor, destination)) {
+            send(source, "teleport_success");
+            if (!source.getUUID().equals(actor.getUUID())) {
+                send(actor, "teleport_success");
+            }
         }
         return Command.SINGLE_SUCCESS;
     }
@@ -807,8 +1041,9 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         if (level == null) {
             level = minecraftServer.overworld();
         }
-        teleport(player, level, pos.x, pos.y, pos.z, pos.yaw, pos.pitch);
-        send(player, "teleport_success");
+        if (teleport(player, level, pos.x, pos.y, pos.z, pos.yaw, pos.pitch)) {
+            send(player, "teleport_success");
+        }
         return Command.SINGLE_SUCCESS;
     }
 
@@ -825,6 +1060,14 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             send(ctx.getSource(), "player_only");
             return 0;
         }
+        if (config.teleportDisabledIn(player.serverLevel())) {
+            send(player, "teleport_disabled_dimension", Map.of("dimension", player.serverLevel().dimension().location().toString()));
+            return 0;
+        }
+        if (config.rtpDisabledIn(player.serverLevel())) {
+            send(player, "rtp_disabled_dimension", Map.of("dimension", player.serverLevel().dimension().location().toString()));
+            return 0;
+        }
         int remaining = rtpCooldownRemaining(player.getUUID());
         if (remaining > 0) {
             sendRtpCooldown(player, remaining);
@@ -834,6 +1077,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         int realmMax = config.rtpMax(player.serverLevel());
         Position random = randomSafe(player, player.serverLevel(), player.getX(), player.getZ(), realmMin, realmMax);
         queueDelayedTeleport(
+            player,
             player,
             TeleportKind.RTP,
             () -> player.serverLevel(),
@@ -854,6 +1098,10 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         ServerPlayer player = ctx.getSource().getPlayer();
         if (player == null) {
             send(ctx.getSource(), "player_only");
+            return 0;
+        }
+        if (config.teleportDisabledIn(player.serverLevel())) {
+            send(player, "teleport_disabled_dimension", Map.of("dimension", player.serverLevel().dimension().location().toString()));
             return 0;
         }
         BlockPos spawn = player.serverLevel().getSharedSpawnPos();
@@ -1020,6 +1268,11 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         if (level == null) {
             level = player.serverLevel();
         }
+        ServerLevel blocked = firstBlockedTeleportLevel(player.serverLevel(), level);
+        if (blocked != null) {
+            send(player, "teleport_disabled_dimension", Map.of("dimension", blocked.dimension().location().toString()));
+            return 0;
+        }
         Position finalHome = home;
         ServerLevel finalLevel = level;
         queueDelayedTeleport(player, TeleportKind.HOME, () -> finalLevel, () -> finalHome.x, () -> finalHome.y, () -> finalHome.z, finalHome.yaw, finalHome.pitch);
@@ -1027,11 +1280,12 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
     }
 
     private void queueDelayedTeleport(ServerPlayer player, TeleportKind kind, LevelSupplier level, DoubleSupplier x, DoubleSupplier y, DoubleSupplier z, float yaw, float pitch) {
-        queueDelayedTeleport(player, kind, level, x, y, z, yaw, pitch, () -> {});
+        queueDelayedTeleport(player, player, kind, level, x, y, z, yaw, pitch, () -> {});
     }
 
     private void queueDelayedTeleport(
         ServerPlayer player,
+        ServerPlayer payer,
         TeleportKind kind,
         LevelSupplier level,
         DoubleSupplier x,
@@ -1041,38 +1295,64 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         float pitch,
         Runnable onSuccess
     ) {
-        ChargeResult charge = charge(player, kind);
-        if (!charge.success) {
-            String template = messages.getOrDefault("cost_failed", "cost_failed");
-            if (!template.contains("%required%")) {
-                sendRaw(player, "You require " + charge.required + " to teleport.");
-            } else {
-                send(player, "cost_failed", Map.of("required", charge.required));
-            }
+        if (config.teleportDisabledIn(player.serverLevel())) {
+            send(player, "teleport_disabled_dimension", Map.of("dimension", player.serverLevel().dimension().location().toString()));
             return;
         }
-
         pendingTeleports.remove(player.getUUID());
-        if (charge.paid != null && !charge.paid.isBlank()) {
-            sendRaw(player, "Paid " + charge.paid + ".");
-        }
         TargetSupplier supplier = () -> new TeleportTarget(level.get(), x.get(), y.get(), z.get(), yaw, pitch);
         int delayTicks = Math.max(0, config.teleportDelaySeconds * 20);
         if (delayTicks == 0) {
-            teleport(player, supplier.get());
-            onSuccess.run();
-            send(player, "teleport_success");
-            play(player, "success");
+            ChargeResult charge = charge(payer, kind);
+            if (!charge.success) {
+                String template = messages.getOrDefault("cost_failed", "cost_failed");
+                if (!template.contains("%required%")) {
+                    sendRaw(payer, "You require " + charge.required + " to teleport.");
+                } else {
+                    send(payer, "cost_failed", Map.of("required", charge.required));
+                }
+                return;
+            }
+            if (charge.paid != null && !charge.paid.isBlank()) {
+                sendRaw(payer, "Paid " + charge.paid + ".");
+            }
+            if (teleport(player, supplier.get())) {
+                onSuccess.run();
+                send(player, "teleport_success");
+                play(player, "success");
+            }
             return;
         }
 
         pendingTeleports.put(
             player.getUUID(),
-            new PendingTeleport(BlockPos.containing(player.getX(), player.getY(), player.getZ()), delayTicks, supplier, onSuccess)
+            new PendingTeleport(BlockPos.containing(player.getX(), player.getY(), player.getZ()), delayTicks, supplier, onSuccess, payer.getUUID(), kind)
         );
     }
 
+    private void queueDelayedTeleport(
+        ServerPlayer player,
+        ServerPlayer payer,
+        TeleportKind kind,
+        LevelSupplier level,
+        DoubleSupplier x,
+        DoubleSupplier y,
+        DoubleSupplier z,
+        float yaw,
+        float pitch
+    ) {
+        queueDelayedTeleport(player, payer, kind, level, x, y, z, yaw, pitch, () -> {});
+    }
+
     private ChargeResult charge(ServerPlayer player, TeleportKind kind) {
+        return evaluateCharge(player, kind, true);
+    }
+
+    private ChargeResult previewCharge(ServerPlayer player, TeleportKind kind) {
+        return evaluateCharge(player, kind, false);
+    }
+
+    private ChargeResult evaluateCharge(ServerPlayer player, TeleportKind kind, boolean deduct) {
         if (!config.costsEnabled || config.costMode == CostMode.NONE) {
             return ChargeResult.ok();
         }
@@ -1084,7 +1364,9 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             if (player.experienceLevel < cost) {
                 return ChargeResult.fail(cost + " XP level" + (cost == 1 ? "" : "s"));
             }
-            player.giveExperienceLevels(-cost);
+            if (deduct) {
+                player.giveExperienceLevels(-cost);
+            }
             return ChargeResult.okPaid(cost + " XP level" + (cost == 1 ? "" : "s"));
         }
 
@@ -1096,6 +1378,9 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         int available = player.getInventory().countItem(item);
         if (available < amount) {
             return ChargeResult.fail(amount + " " + displayMaterial(config.costItemName));
+        }
+        if (!deduct) {
+            return ChargeResult.okPaid(amount + " " + displayMaterial(config.costItemName));
         }
         int remaining = amount;
         for (int slot = 0; slot < player.getInventory().getContainerSize() && remaining > 0; slot++) {
@@ -1124,9 +1409,17 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         return now.getX() != start.getX() || now.getY() != start.getY() || now.getZ() != start.getZ();
     }
 
-    private void teleport(ServerPlayer player, TeleportTarget target) {
+    private boolean teleport(ServerPlayer player, TeleportTarget target) {
+        if (config.teleportDisabledIn(player.serverLevel())) {
+            send(player, "teleport_disabled_dimension", Map.of("dimension", player.serverLevel().dimension().location().toString()));
+            return false;
+        }
+        if (config.teleportDisabledIn(target.level)) {
+            send(player, "teleport_disabled_dimension", Map.of("dimension", target.level.dimension().location().toString()));
+            return false;
+        }
         TeleportTarget adjusted = adjustLanding(target);
-        teleport(player, adjusted.level, adjusted.x, adjusted.y, adjusted.z, adjusted.yaw, adjusted.pitch);
+        return teleport(player, adjusted.level, adjusted.x, adjusted.y, adjusted.z, adjusted.yaw, adjusted.pitch);
     }
 
     private TeleportTarget resolveYtpTarget(ServerPlayer player, ServerLevel level, double x, double y, double z, float yaw, float pitch) {
@@ -1250,6 +1543,16 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         return Math.max(min, Math.min(max, value));
     }
 
+    private ServerLevel firstBlockedTeleportLevel(ServerLevel source, ServerLevel destination) {
+        if (config.teleportDisabledIn(source)) {
+            return source;
+        }
+        if (config.teleportDisabledIn(destination)) {
+            return destination;
+        }
+        return null;
+    }
+
     private TeleportTarget adjustLanding(TeleportTarget target) {
         if (config.landingMode != LandingMode.RANDOM_OFFSET) {
             return target;
@@ -1266,8 +1569,17 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         return target;
     }
 
-    private void teleport(ServerPlayer player, ServerLevel level, double x, double y, double z, float yaw, float pitch) {
+    private boolean teleport(ServerPlayer player, ServerLevel level, double x, double y, double z, float yaw, float pitch) {
+        if (config.teleportDisabledIn(player.serverLevel())) {
+            send(player, "teleport_disabled_dimension", Map.of("dimension", player.serverLevel().dimension().location().toString()));
+            return false;
+        }
+        if (config.teleportDisabledIn(level)) {
+            send(player, "teleport_disabled_dimension", Map.of("dimension", level.dimension().location().toString()));
+            return false;
+        }
         player.teleportTo(level, x, y, z, yaw, pitch);
+        return true;
     }
 
     private Position randomSafe(ServerPlayer player, ServerLevel level, double centerX, double centerZ, int minDistance, int maxDistance) {
@@ -1520,6 +1832,8 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         defaults.put("settings.rtp_cooldown_seconds", "300");
         defaults.put("settings.rtp.default_min_distance", "64");
         defaults.put("settings.rtp.default_max_distance", "2500");
+        defaults.put("settings.dimension_restrictions.disable_rtp", "");
+        defaults.put("settings.dimension_restrictions.disable_teleport", "");
         // Optional realm-specific distance defaults can be provided by users:
         // settings.rtp.default_min_distance.overworld / nether / end
         // settings.rtp.default_max_distance.overworld / nether / end
@@ -1589,12 +1903,16 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         private int ticksLeft;
         private final TargetSupplier targetSupplier;
         private final Runnable onSuccess;
+        private final UUID payerId;
+        private final TeleportKind kind;
 
-        private PendingTeleport(BlockPos startPos, int ticksLeft, TargetSupplier targetSupplier, Runnable onSuccess) {
+        private PendingTeleport(BlockPos startPos, int ticksLeft, TargetSupplier targetSupplier, Runnable onSuccess, UUID payerId, TeleportKind kind) {
             this.startPos = startPos;
             this.ticksLeft = ticksLeft;
             this.targetSupplier = targetSupplier;
             this.onSuccess = onSuccess;
+            this.payerId = payerId;
+            this.kind = kind;
         }
     }
 
@@ -1628,6 +1946,8 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         int rtpMaxDistance = 2500;
         Map<String, Integer> rtpMinByDimension = new HashMap<>();
         Map<String, Integer> rtpMaxByDimension = new HashMap<>();
+        Set<String> rtpDisabledDimensions = new HashSet<>();
+        Set<String> teleportDisabledDimensions = new HashSet<>();
         LandingMode landingMode = LandingMode.EXACT;
         int landingRandomOffset = 4;
         boolean appEnabled = true;
@@ -1707,7 +2027,21 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                         }
                     }
                 }
+                if (rawKey.startsWith("settings.dimension_restrictions.disable_rtp.")) {
+                    String dim = normalizeDimension(rawKey.substring("settings.dimension_restrictions.disable_rtp.".length()));
+                    if (boolProp(p, false, rawKey) && !dim.isBlank()) {
+                        c.rtpDisabledDimensions.add(dim);
+                    }
+                }
+                if (rawKey.startsWith("settings.dimension_restrictions.disable_teleport.")) {
+                    String dim = normalizeDimension(rawKey.substring("settings.dimension_restrictions.disable_teleport.".length()));
+                    if (boolProp(p, false, rawKey) && !dim.isBlank()) {
+                        c.teleportDisabledDimensions.add(dim);
+                    }
+                }
             }
+            addDimensionList(c.rtpDisabledDimensions, stringProp(p, "", "settings.dimension_restrictions.disable_rtp"));
+            addDimensionList(c.teleportDisabledDimensions, stringProp(p, "", "settings.dimension_restrictions.disable_teleport"));
 
             // Realm-friendly overrides for RTP: settings.costs.xp_levels.rtp.<realm>, item.rtp.<realm>
             Map<String, String> realmToDim = Map.of(
@@ -1882,6 +2216,56 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             if (level == null) return rtpMaxDistance;
             String dim = level.dimension().location().toString();
             return rtpMaxByDimension.getOrDefault(dim, rtpMaxDistance);
+        }
+
+        boolean rtpDisabledIn(ServerLevel level) {
+            return dimensionIsRestricted(level, rtpDisabledDimensions);
+        }
+
+        boolean teleportDisabledIn(ServerLevel level) {
+            return dimensionIsRestricted(level, teleportDisabledDimensions);
+        }
+
+        private static void addDimensionList(Set<String> sink, String raw) {
+            if (raw == null || raw.isBlank()) {
+                return;
+            }
+            for (String part : raw.split(",")) {
+                String normalized = normalizeDimension(part);
+                if (!normalized.isBlank()) {
+                    sink.add(normalized);
+                }
+            }
+        }
+
+        private static String normalizeDimension(String value) {
+            if (value == null) {
+                return "";
+            }
+            return value.trim().toLowerCase(Locale.ROOT);
+        }
+
+        private static boolean dimensionIsRestricted(ServerLevel level, Set<String> restrictions) {
+            if (level == null || restrictions.isEmpty()) {
+                return false;
+            }
+            String id = normalizeDimension(level.dimension().location().toString());
+            if (restrictions.contains(id)) {
+                return true;
+            }
+            String path = normalizeDimension(level.dimension().location().getPath());
+            if (restrictions.contains(path)) {
+                return true;
+            }
+            String realm = "";
+            if (level.dimension().equals(Level.OVERWORLD)) {
+                realm = "overworld";
+            } else if (level.dimension().equals(Level.NETHER)) {
+                realm = "nether";
+            } else if (level.dimension().equals(Level.END)) {
+                realm = "end";
+            }
+            return !realm.isBlank() && restrictions.contains(realm);
         }
 
         SoundEvent sound(String key) {

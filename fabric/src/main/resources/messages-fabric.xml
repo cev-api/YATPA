@@ -38,6 +38,8 @@
   <message key="feature_tpahere_disabled">Teleport-here requests (/tpahere) are currently disabled.</message>
   <message key="feature_homes_disabled">Homes are currently disabled.</message>
   <message key="feature_rtp_disabled">Random teleport (/rtp) is currently disabled.</message>
+  <message key="rtp_disabled_dimension">Random teleport is disabled in this dimension (%dimension%).</message>
+  <message key="teleport_disabled_dimension">Teleporting is disabled in this dimension (%dimension%).</message>
   <message key="accept_button">[Accept]</message>
   <message key="accept_hover">Click to accept this request</message>
   <message key="deny_button">[Deny]</message>

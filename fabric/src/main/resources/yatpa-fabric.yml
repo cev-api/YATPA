@@ -16,6 +16,11 @@ settings:
   rtp:
     default_min_distance: 64
     default_max_distance: 2500
+  dimension_restrictions:
+    # Comma-separated list for properties config, or map keys in YAML.
+    # Examples: overworld, minecraft:the_nether, my_custom_dimension
+    disable_rtp: []
+    disable_teleport: []
   landing:
     mode: EXACT
     random_offset_max: 4
