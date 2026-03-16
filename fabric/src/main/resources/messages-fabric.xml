@@ -44,4 +44,5 @@
   <message key="accept_hover">Click to accept this request</message>
   <message key="deny_button">[Deny]</message>
   <message key="deny_hover">Click to deny this request</message>
+  <message key="spawn_set">Spawn location set.</message>
 </messages>

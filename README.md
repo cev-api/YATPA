@@ -1,5 +1,5 @@
 # YATPA
-Current version: `1.0.3`
+Current version: `1.0.4`
 
 Yet Another TPA.
 
@@ -39,6 +39,7 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
   - `/yatpa gui` (Paper, paginated inventory editor for all settings; click to toggle/edit)
   - `/yatpa set <path> <value>`
   - `/yatpa reload`
+  - `/setspawn`
 - Player help page:
   - `/tpahelp`
   - `/tphelp`
@@ -58,6 +59,10 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
 - Cost failures show exact requirement (for example, required XP levels or item amount/type).
 - Feature toggles for `tpa`, `tpahere`, `homes`, and `rtp`.
 - RTP cooldown (`settings.rtp_cooldown_seconds`, default `300`).
+- Optional `/rtp` to-overworld mode (`settings.rtp.rtp_to_overworld`, `settings.rtp.overworld_name`).
+- `/rtp` blacklist support (`settings.rtp.blacklisted_worlds`) in addition to dimension restrictions.
+- Configurable spawn location with `/setspawn` and `settings.spawn.*`.
+- Optional first-join spawn teleport (`settings.spawn.first_join_only`).
 - The `ytp` and `rtp` commands have safeguards against teleporting into lava or into walls/blocks and will move you to the nearest safe spot.
 - The `ytp` command also lets you teleport into different realms/dimensions.
 - The `rtp` command can have different costs for each realm/dimension.
@@ -127,6 +132,9 @@ settings:
   rtp:
     default_min_distance: 64
     default_max_distance: 2500
+    rtp_to_overworld: false
+    overworld_name: "world"
+    blacklisted_worlds: []
     # Optional per-realm overrides
     realm_min_distance:
       overworld: 96
@@ -176,6 +184,15 @@ settings:
         nether: 0
         end: 0
       spawn: 10
+  spawn:
+    enabled: true
+    first_join_only: true
+    x: 0
+    y: 100
+    z: 0
+    yaw: 0
+    pitch: 0
+    world: world
 sounds:
   request_sent: ENTITY_EXPERIENCE_ORB_PICKUP
   request_received: BLOCK_NOTE_BLOCK_PLING
@@ -200,6 +217,7 @@ Fabric `config.properties` supports the same restrictions with either:
 - `yatpa.op.reload` (default: op)
 - `yatpa.op.tp` (default: op)
 - `yatpa.op.tpoffline` (default: op)
+- `yatpa.op.setspawn` (default: op)
 
 ## License
 

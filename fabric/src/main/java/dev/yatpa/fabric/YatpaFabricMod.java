@@ -88,6 +88,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
     private final Map<UUID, Long> cooldownBySender = new HashMap<>();
     private final Map<UUID, PendingTeleport> pendingTeleports = new HashMap<>();
     private final Map<UUID, Long> rtpCooldownByPlayer = new HashMap<>();
+    private final Set<UUID> observedOnlinePlayers = new HashSet<>();
 
     private Store store = new Store();
     private Config config = new Config();
@@ -151,6 +152,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             d.register(Commands.literal("tpoffline").requires(src -> src.hasPermission(2)).then(Commands.argument("name", StringArgumentType.word()).executes(this::tpOffline)));
             d.register(Commands.literal("rtp").executes(this::rtp));
             d.register(Commands.literal("spawn").executes(this::spawn));
+            d.register(Commands.literal("setspawn").requires(src -> src.hasPermission(2)).executes(this::setSpawn));
             d.register(Commands.literal("tphome")
                 .executes(this::homeDefault)
                 .then(Commands.argument("name", StringArgumentType.word()).executes(this::homeNamed))
@@ -182,6 +184,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
 
     private void tick(MinecraftServer minecraftServer) {
         this.server = minecraftServer;
+        handlePlayerJoins(minecraftServer);
         purgeExpiredRequests();
 
         List<UUID> finished = new ArrayList<>();
@@ -233,6 +236,18 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             }
         }
         finished.forEach(pendingTeleports::remove);
+    }
+
+    private void handlePlayerJoins(MinecraftServer minecraftServer) {
+        Set<UUID> onlineNow = new HashSet<>();
+        for (ServerPlayer player : minecraftServer.getPlayerList().getPlayers()) {
+            UUID id = player.getUUID();
+            onlineNow.add(id);
+            if (observedOnlinePlayers.add(id)) {
+                handleJoinSpawn(player);
+            }
+        }
+        observedOnlinePlayers.retainAll(onlineNow);
     }
 
     private void purgeExpiredRequests() {
@@ -399,6 +414,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             path.startsWith("settings.rtp.default_max_distance.") ||
             path.startsWith("settings.costs.xp_levels.rtp.") ||
             path.startsWith("settings.costs.item.rtp.") ||
+            path.startsWith("settings.rtp.blacklisted_worlds.") ||
             path.startsWith("settings.dimension_restrictions.disable_rtp.") ||
             path.startsWith("settings.dimension_restrictions.disable_teleport.");
         if (!rawConfig.containsKey(path) && !FEATURE_PATHS.contains(path) && !defaultConfigValues().containsKey(path) && !dynamicAllowed) {
@@ -430,6 +446,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             path.startsWith("settings.rtp.default_max_distance.") ||
             path.startsWith("settings.costs.xp_levels.rtp.") ||
             path.startsWith("settings.costs.item.rtp.") ||
+            path.startsWith("settings.rtp.blacklisted_worlds.") ||
             path.startsWith("settings.dimension_restrictions.disable_rtp.") ||
             path.startsWith("settings.dimension_restrictions.disable_teleport.");
         if (!rawConfig.containsKey(path) && !FEATURE_PATHS.contains(path) && !defaultConfigValues().containsKey(path) && !dynamicAllowed) {
@@ -464,6 +481,9 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         if (isIntegerPath(path)) {
             return "integer";
         }
+        if (isDoublePath(path)) {
+            return "number";
+        }
         return "string";
     }
 
@@ -471,9 +491,13 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         return path.startsWith("settings.features.")
             || path.startsWith("settings.dimension_restrictions.disable_rtp.")
             || path.startsWith("settings.dimension_restrictions.disable_teleport.")
+            || path.startsWith("settings.rtp.blacklisted_worlds.")
             || path.equals("settings.cancel_on_move")
             || path.equals("settings.cancel_on_damage")
-            || path.equals("settings.costs.enabled");
+            || path.equals("settings.costs.enabled")
+            || path.equals("settings.rtp.rtp_to_overworld")
+            || path.equals("settings.spawn.enabled")
+            || path.equals("settings.spawn.first_join_only");
     }
 
     private boolean isIntegerPath(String path) {
@@ -485,6 +509,14 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             || (path.contains(".costs.item.") && !path.equals("settings.costs.item.material"))
             || path.contains(".realm_min_distance.")
             || path.contains(".realm_max_distance.");
+    }
+
+    private boolean isDoublePath(String path) {
+        return path.equals("settings.spawn.x")
+            || path.equals("settings.spawn.y")
+            || path.equals("settings.spawn.z")
+            || path.equals("settings.spawn.yaw")
+            || path.equals("settings.spawn.pitch");
     }
 
     private boolean isCostModePath(String path) { return path.equals("settings.costs.mode"); }
@@ -504,6 +536,13 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         if (isIntegerPath(path)) {
             try {
                 return String.valueOf(Integer.parseInt(value));
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        if (isDoublePath(path)) {
+            try {
+                return String.valueOf(Double.parseDouble(value));
             } catch (NumberFormatException ignored) {
                 return null;
             }
@@ -1068,19 +1107,28 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             send(player, "rtp_disabled_dimension", Map.of("dimension", player.serverLevel().dimension().location().toString()));
             return 0;
         }
+        ServerLevel targetLevel = player.serverLevel();
+        if (config.rtpToOverworld) {
+            targetLevel = resolveSpawnWorld(Objects.requireNonNull(player.getServer()), config.overworldName);
+            if (targetLevel == null) {
+                sendRaw(player, "World not found, cannot perform RTP to world: " + config.overworldName);
+                return 0;
+            }
+        }
         int remaining = rtpCooldownRemaining(player.getUUID());
         if (remaining > 0) {
             sendRtpCooldown(player, remaining);
             return 0;
         }
-        int realmMin = config.rtpMin(player.serverLevel());
-        int realmMax = config.rtpMax(player.serverLevel());
-        Position random = randomSafe(player, player.serverLevel(), player.getX(), player.getZ(), realmMin, realmMax);
+        int realmMin = config.rtpMin(targetLevel);
+        int realmMax = config.rtpMax(targetLevel);
+        Position random = randomSafe(player, targetLevel, player.getX(), player.getZ(), realmMin, realmMax);
+        final ServerLevel finalTargetLevel = targetLevel;
         queueDelayedTeleport(
             player,
             player,
             TeleportKind.RTP,
-            () -> player.serverLevel(),
+            () -> finalTargetLevel,
             () -> random.x,
             () -> random.y,
             () -> random.z,
@@ -1095,6 +1143,9 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         if (!ensureAppEnabled(ctx.getSource())) {
             return 0;
         }
+        if (!config.spawnEnabled) {
+            return Command.SINGLE_SUCCESS;
+        }
         ServerPlayer player = ctx.getSource().getPlayer();
         if (player == null) {
             send(ctx.getSource(), "player_only");
@@ -1104,9 +1155,37 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             send(player, "teleport_disabled_dimension", Map.of("dimension", player.serverLevel().dimension().location().toString()));
             return 0;
         }
-        BlockPos spawn = player.serverLevel().getSharedSpawnPos();
-        Position random = randomSafe(player, player.serverLevel(), spawn.getX(), spawn.getZ(), 0, config.spawnRadius);
-        queueDelayedTeleport(player, TeleportKind.SPAWN, () -> player.serverLevel(), () -> random.x, () -> random.y, () -> random.z, player.getYRot(), player.getXRot());
+        TeleportTarget spawn = configuredSpawnTarget(player, player.serverLevel());
+        queueDelayedTeleport(player, TeleportKind.SPAWN, () -> spawn.level, () -> spawn.x, () -> spawn.y, () -> spawn.z, spawn.yaw, spawn.pitch);
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private int setSpawn(CommandContext<CommandSourceStack> ctx) {
+        if (!ensureAppEnabled(ctx.getSource())) {
+            return 0;
+        }
+        if (!config.spawnEnabled) {
+            return Command.SINGLE_SUCCESS;
+        }
+        ServerPlayer player = ctx.getSource().getPlayer();
+        if (player == null) {
+            send(ctx.getSource(), "player_only");
+            return 0;
+        }
+        rawConfig.setProperty("settings.spawn.world", player.serverLevel().dimension().location().toString());
+        rawConfig.setProperty("settings.spawn.x", Double.toString(player.getX()));
+        rawConfig.setProperty("settings.spawn.y", Double.toString(player.getY()));
+        rawConfig.setProperty("settings.spawn.z", Double.toString(player.getZ()));
+        rawConfig.setProperty("settings.spawn.yaw", Float.toString(player.getYRot()));
+        rawConfig.setProperty("settings.spawn.pitch", Float.toString(player.getXRot()));
+        try {
+            saveConfigProperties();
+            loadConfig(runtimeConfigPath);
+        } catch (IOException e) {
+            sendRaw(ctx.getSource(), "Failed to save config: " + e.getMessage());
+            return 0;
+        }
+        send(player, "spawn_set");
         return Command.SINGLE_SUCCESS;
     }
 
@@ -1620,6 +1699,41 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         return level.dimension().location().toString();
     }
 
+    private void handleJoinSpawn(ServerPlayer player) {
+        String key = player.getUUID().toString();
+        boolean seen = store.joinedPlayers.contains(key);
+        if (config.spawnEnabled && (!config.spawnFirstJoinOnly || !seen)) {
+            TeleportTarget target = configuredSpawnTarget(player, player.serverLevel());
+            player.teleportTo(target.level, target.x, target.y, target.z, target.yaw, target.pitch);
+        }
+        if (!seen) {
+            store.joinedPlayers.add(key);
+            saveStore();
+        }
+    }
+
+    private TeleportTarget configuredSpawnTarget(ServerPlayer player, ServerLevel fallbackLevel) {
+        MinecraftServer minecraftServer = Objects.requireNonNull(player.getServer());
+        ServerLevel level = resolveSpawnWorld(minecraftServer, config.spawnWorld);
+        if (level == null) {
+            level = fallbackLevel != null ? fallbackLevel : minecraftServer.overworld();
+        }
+        return new TeleportTarget(level, config.spawnX, config.spawnY, config.spawnZ, (float) config.spawnYaw, (float) config.spawnPitch);
+    }
+
+    private ServerLevel resolveSpawnWorld(MinecraftServer minecraftServer, String worldKey) {
+        if (worldKey == null || worldKey.isBlank()) {
+            return minecraftServer.overworld();
+        }
+        String input = worldKey.trim().toLowerCase(Locale.ROOT);
+        return switch (input) {
+            case "overworld", "world", "normal" -> minecraftServer.getLevel(Level.OVERWORLD);
+            case "nether", "the_nether" -> minecraftServer.getLevel(Level.NETHER);
+            case "end", "the_end" -> minecraftServer.getLevel(Level.END);
+            default -> resolveRealmById(minecraftServer, input);
+        };
+    }
+
     private int cooldownRemaining(UUID sender) {
         long last = cooldownBySender.getOrDefault(sender, 0L);
         long elapsed = (System.currentTimeMillis() - last) / 1000L;
@@ -1832,8 +1946,19 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         defaults.put("settings.rtp_cooldown_seconds", "300");
         defaults.put("settings.rtp.default_min_distance", "64");
         defaults.put("settings.rtp.default_max_distance", "2500");
+        defaults.put("settings.rtp.rtp_to_overworld", "false");
+        defaults.put("settings.rtp.blacklisted_worlds", "");
+        defaults.put("settings.rtp.overworld_name", "world");
         defaults.put("settings.dimension_restrictions.disable_rtp", "");
         defaults.put("settings.dimension_restrictions.disable_teleport", "");
+        defaults.put("settings.spawn.enabled", "true");
+        defaults.put("settings.spawn.first_join_only", "true");
+        defaults.put("settings.spawn.x", "0");
+        defaults.put("settings.spawn.y", "100");
+        defaults.put("settings.spawn.z", "0");
+        defaults.put("settings.spawn.yaw", "0");
+        defaults.put("settings.spawn.pitch", "0");
+        defaults.put("settings.spawn.world", "world");
         // Optional realm-specific distance defaults can be provided by users:
         // settings.rtp.default_min_distance.overworld / nether / end
         // settings.rtp.default_max_distance.overworld / nether / end
@@ -1955,6 +2080,16 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         boolean tpaHereEnabled = true;
         boolean homesEnabled = true;
         boolean rtpEnabled = true;
+        boolean rtpToOverworld = false;
+        String overworldName = "world";
+        boolean spawnEnabled = true;
+        boolean spawnFirstJoinOnly = true;
+        double spawnX = 0.0;
+        double spawnY = 100.0;
+        double spawnZ = 0.0;
+        double spawnYaw = 0.0;
+        double spawnPitch = 0.0;
+        String spawnWorld = "world";
         boolean costsEnabled = false;
         CostMode costMode = CostMode.NONE;
         String costItemName = "ENDER_PEARL";
@@ -1978,6 +2113,8 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             c.rtpCooldownSeconds = intProp(p, 300, "settings.rtp_cooldown_seconds", "rtp_cooldown_seconds");
             c.rtpMinDistance = intProp(p, 64, "settings.rtp.default_min_distance", "settings.rtp_min_distance", "rtp_min_distance");
             c.rtpMaxDistance = intProp(p, 2500, "settings.rtp.default_max_distance", "settings.rtp_max_distance", "rtp_max_distance");
+            c.rtpToOverworld = boolProp(p, false, "settings.rtp.rtp_to_overworld");
+            c.overworldName = stringProp(p, "world", "settings.rtp.overworld_name");
             c.landingMode = parseLanding(stringProp(p, "EXACT", "settings.landing.mode", "landing_mode"));
             c.landingRandomOffset = intProp(p, 4, "settings.landing.random_offset_max", "landing_random_offset");
             c.appEnabled = boolProp(p, true, "settings.features.enabled", "features_enabled");
@@ -1985,6 +2122,14 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             c.tpaHereEnabled = boolProp(p, true, "settings.features.tpahere", "feature_tpahere");
             c.homesEnabled = boolProp(p, true, "settings.features.homes", "feature_homes");
             c.rtpEnabled = boolProp(p, true, "settings.features.rtp", "feature_rtp");
+            c.spawnEnabled = boolProp(p, true, "settings.spawn.enabled");
+            c.spawnFirstJoinOnly = boolProp(p, true, "settings.spawn.first_join_only");
+            c.spawnX = doubleProp(p, 0.0, "settings.spawn.x");
+            c.spawnY = doubleProp(p, 100.0, "settings.spawn.y");
+            c.spawnZ = doubleProp(p, 0.0, "settings.spawn.z");
+            c.spawnYaw = doubleProp(p, 0.0, "settings.spawn.yaw");
+            c.spawnPitch = doubleProp(p, 0.0, "settings.spawn.pitch");
+            c.spawnWorld = stringProp(p, "world", "settings.spawn.world");
             c.costsEnabled = boolProp(p, false, "settings.costs.enabled", "costs_enabled");
             c.costMode = parseCostMode(stringProp(p, "NONE", "settings.costs.mode", "cost_mode"));
             c.costItemName = stringProp(p, "ENDER_PEARL", "settings.costs.item.material", "cost_item_material");
@@ -2042,6 +2187,10 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             }
             addDimensionList(c.rtpDisabledDimensions, stringProp(p, "", "settings.dimension_restrictions.disable_rtp"));
             addDimensionList(c.teleportDisabledDimensions, stringProp(p, "", "settings.dimension_restrictions.disable_teleport"));
+            c.rtpDisabledDimensions.addAll(parseDimensionRestrictions(p, "settings.rtp.blacklisted_worlds"));
+            c.rtpDisabledDimensions.addAll(parseDimensionRestrictions(p, "settings.rtp.blacklistedworlds"));
+            c.rtpDisabledDimensions.addAll(parseDimensionRestrictions(p, "rtp.blacklisted_worlds"));
+            c.rtpDisabledDimensions.addAll(parseDimensionRestrictions(p, "rtp.blacklistedworlds"));
 
             // Realm-friendly overrides for RTP: settings.costs.xp_levels.rtp.<realm>, item.rtp.<realm>
             Map<String, String> realmToDim = Map.of(
@@ -2086,6 +2235,18 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             }
             try {
                 return Integer.parseInt(value);
+            } catch (NumberFormatException ignored) {
+                return def;
+            }
+        }
+
+        private static double doubleProp(Properties p, double def, String... keys) {
+            String value = find(p, keys);
+            if (value == null) {
+                return def;
+            }
+            try {
+                return Double.parseDouble(value);
             } catch (NumberFormatException ignored) {
                 return def;
             }
@@ -2238,6 +2399,25 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             }
         }
 
+        private static Set<String> parseDimensionRestrictions(Properties p, String rootPath) {
+            Set<String> values = new HashSet<>();
+            addDimensionList(values, stringProp(p, "", rootPath));
+            String prefix = rootPath + ".";
+            for (String key : p.stringPropertyNames()) {
+                if (!key.startsWith(prefix)) {
+                    continue;
+                }
+                if (!boolProp(p, false, key)) {
+                    continue;
+                }
+                String normalized = normalizeDimension(key.substring(prefix.length()));
+                if (!normalized.isBlank()) {
+                    values.add(normalized);
+                }
+            }
+            return values;
+        }
+
         private static String normalizeDimension(String value) {
             if (value == null) {
                 return "";
@@ -2265,6 +2445,9 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             } else if (level.dimension().equals(Level.END)) {
                 realm = "end";
             }
+            if (level.dimension().equals(Level.OVERWORLD) && restrictions.contains("world")) {
+                return true;
+            }
             return !realm.isBlank() && restrictions.contains(realm);
         }
 
@@ -2283,6 +2466,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         Map<String, String> defaultHomes = new HashMap<>();
         Map<String, Integer> homeLimits = new HashMap<>();
         Map<String, Position> offlineLocations = new HashMap<>();
+        Set<String> joinedPlayers = new HashSet<>();
     }
 
     private static class PlayerPrefs {
