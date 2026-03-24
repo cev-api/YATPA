@@ -119,7 +119,6 @@ public class YatpaPaperPlugin extends JavaPlugin {
         changed |= ensureDefault(cfg, "settings.spawn.yaw", 0.0f);
         changed |= ensureDefault(cfg, "settings.spawn.pitch", 0.0f);
         changed |= ensureDefault(cfg, "settings.spawn.enabled", true);
-        changed |= ensureDefault(cfg, "settings.spawn.first_join_only", false);
 
         // Migrate accidental string booleans (e.g. rtp_to_overworld: "true") into real booleans.
         changed |= coerceStringBoolean(cfg, "settings.rtp.rtp_to_overworld");

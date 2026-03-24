@@ -30,6 +30,7 @@
   <message key="home_default_set">Default home set to '%name%'.</message>
   <message key="home_limit">You reached your home limit (%limit%).</message>
   <message key="offline_missing">No logout location found for that player.</message>
+  <message key="death_missing">No death location found yet.</message>
   <message key="usage_yatpa_help">Usage: /yatpa help</message>
   <message key="rtp_cooldown">You must wait %seconds%s before using /rtp again.</message>
   <message key="cost_failed">You do not have enough resources for this teleport. Required: %required%.</message>
@@ -38,6 +39,7 @@
   <message key="feature_tpahere_disabled">Teleport-here requests (/tpahere) are currently disabled.</message>
   <message key="feature_homes_disabled">Homes are currently disabled.</message>
   <message key="feature_rtp_disabled">Random teleport (/rtp) is currently disabled.</message>
+  <message key="feature_tpaback_disabled">Back teleport (/tpaback) is currently disabled.</message>
   <message key="rtp_disabled_dimension">Random teleport is disabled in this dimension (%dimension%).</message>
   <message key="teleport_disabled_dimension">Teleporting is disabled in this dimension (%dimension%).</message>
   <message key="accept_button">[Accept]</message>

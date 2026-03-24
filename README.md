@@ -1,5 +1,5 @@
 # YATPA
-Current version: `1.0.4`
+Current version: `1.0.5`
 
 Yet Another TPA.
 
@@ -28,6 +28,7 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
 - Utility teleports:
   - `/rtp`
   - `/spawn`
+  - `/tpaback` (last death location)
 - OP commands:
   - `/ytp <player>`
   - `/ytp <player> <targetPlayer>`
@@ -46,31 +47,27 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
   - `/yatpa help`
   - When teleport costs are enabled, a `Costs` section is shown at the bottom listing only teleports with non-zero costs.
 
-## Notable behavior
+## Notable Behavior
 
-- Request timeout and request cooldown.
-- Teleport delay with countdown.
-- Optional cancel on move/damage.
-- Clickable accept/deny messages.
-- XML-based messages.
-- Configurable sounds and particle effects.
-- Configurable teleport costs for each teleport type (XP or Items).
-- Costs are charged at teleport execution time (after countdown), not when countdown starts.
-- Cost failures show exact requirement (for example, required XP levels or item amount/type).
-- Feature toggles for `tpa`, `tpahere`, `homes`, and `rtp`.
-- RTP cooldown (`settings.rtp_cooldown_seconds`, default `300`).
-- Optional `/rtp` to-overworld mode (`settings.rtp.rtp_to_overworld`, `settings.rtp.overworld_name`).
-- `/rtp` blacklist support (`settings.rtp.blacklisted_worlds`) in addition to dimension restrictions.
-- Configurable spawn location with `/setspawn` and `settings.spawn.*`.
-- Optional first-join spawn teleport (`settings.spawn.first_join_only`).
-- The `ytp` and `rtp` commands have safeguards against teleporting into lava or into walls/blocks and will move you to the nearest safe spot.
-- The `ytp` command also lets you teleport into different realms/dimensions.
-- The `rtp` command can have different costs for each realm/dimension.
-- `rtp` min/max distances can be overridden per realm (Overworld/Nether/End) on Fabric and Paper.
-- Per-dimension restrictions:
-  - Disable `/rtp` only in specific dimensions.
-  - Disable all YATPA teleports in specific dimensions.
-- After a successful paid teleport, the player is told exactly what they paid (XP or items).
+- Requests:
+  - Timeout + cooldown are enforced.
+  - Accept/deny messages are clickable.
+  - If an accepted delayed teleport is cancelled (move/damage), the other player is notified.
+- Teleports:
+  - Delayed teleports show a countdown.
+  - Costs are validated before countdown and charged on execution.
+  - Players are told exactly what they paid (XP, items, or currency).
+  - `ytp`/`rtp` use safe landing checks to avoid unsafe blocks and lava.
+- Costs and settings:
+  - Cost modes: `NONE`, `XP_LEVELS`, `ITEM`, `CURRENCY`.
+  - Realm-specific RTP costs and min/max RTP distance overrides are supported.
+  - Paper `/yatpa gui` and `/yatpa set` expose currency paths directly.
+- Restrictions and routing:
+  - Per-dimension restrictions can disable `/rtp` only or all YATPA teleports.
+  - `/rtp` supports blacklist + optional overworld routing.
+  - Spawn destination is configurable via `settings.spawn.*` and `/setspawn`.
+- Platform note:
+  - Vault/EssentialsX currency charging is Paper-only in this release.
 
 ## Paper build output
 
@@ -162,11 +159,12 @@ settings:
     rtp: true
   costs:
     enabled: false
-    mode: NONE # NONE, XP_LEVELS, ITEM
+    mode: NONE # NONE, XP_LEVELS, ITEM, CURRENCY
     xp_levels:
       tpa: 4
       tpahere: 4
       home: 16
+      back: 0
       # Per-realm RTP overrides (optional; overrides global if set)
       rtp:
         overworld: 30
@@ -178,15 +176,26 @@ settings:
       tpa: 2
       tpahere: 2
       home: 20
+      back: 0
       # Per-realm RTP overrides (optional; overrides global if set)
       rtp:
         overworld: 30
         nether: 0
         end: 0
       spawn: 10
+    currency:
+      tpa: 0.0
+      tpahere: 0.0
+      home: 0.0
+      back: 0.0
+      # Per-realm RTP overrides (optional; overrides global if set)
+      rtp:
+        overworld: 0.0
+        nether: 0.0
+        end: 0.0
+      spawn: 0.0
   spawn:
     enabled: true
-    first_join_only: true
     x: 0
     y: 100
     z: 0

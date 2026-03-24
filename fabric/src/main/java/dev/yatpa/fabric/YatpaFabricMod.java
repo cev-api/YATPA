@@ -80,7 +80,8 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         "settings.features.tpa",
         "settings.features.tpahere",
         "settings.features.homes",
-        "settings.features.rtp"
+        "settings.features.rtp",
+        "settings.features.tpaback"
     );
 
     private final Map<String, String> messages = new HashMap<>();
@@ -88,7 +89,6 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
     private final Map<UUID, Long> cooldownBySender = new HashMap<>();
     private final Map<UUID, PendingTeleport> pendingTeleports = new HashMap<>();
     private final Map<UUID, Long> rtpCooldownByPlayer = new HashMap<>();
-    private final Set<UUID> observedOnlinePlayers = new HashSet<>();
 
     private Store store = new Store();
     private Config config = new Config();
@@ -149,7 +149,12 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                             .then(Commands.argument("realm", StringArgumentType.word())
                                 .suggests(this::suggestRealms)
                                 .executes(this::opYtpCoordinatesRealm))))));
-            d.register(Commands.literal("tpoffline").requires(src -> src.hasPermission(2)).then(Commands.argument("name", StringArgumentType.word()).executes(this::tpOffline)));
+            d.register(Commands.literal("tpoffline")
+                .requires(src -> src.hasPermission(2))
+                .then(Commands.argument("name", StringArgumentType.word())
+                    .suggests(this::suggestOfflineNames)
+                    .executes(this::tpOffline)));
+            d.register(Commands.literal("tpaback").executes(this::tpaback));
             d.register(Commands.literal("rtp").executes(this::rtp));
             d.register(Commands.literal("spawn").executes(this::spawn));
             d.register(Commands.literal("setspawn").requires(src -> src.hasPermission(2)).executes(this::setSpawn));
@@ -173,7 +178,13 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             pendingTeleports.remove(player.getUUID());
             saveStore();
         });
-        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> pendingTeleports.remove(((ServerPlayer) newPlayer).getUUID()));
+        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
+            ServerPlayer oldP = (ServerPlayer) oldPlayer;
+            ServerPlayer newP = (ServerPlayer) newPlayer;
+            pendingTeleports.remove(newP.getUUID());
+            store.deathLocations.put(newP.getUUID().toString(), Position.fromPlayer(oldP));
+            saveStore();
+        });
         ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
             if (entity instanceof ServerPlayer player && config.cancelOnDamage) {
                 cancelPending(player, "cancelled_damage");
@@ -184,7 +195,6 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
 
     private void tick(MinecraftServer minecraftServer) {
         this.server = minecraftServer;
-        handlePlayerJoins(minecraftServer);
         purgeExpiredRequests();
 
         List<UUID> finished = new ArrayList<>();
@@ -236,18 +246,6 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             }
         }
         finished.forEach(pendingTeleports::remove);
-    }
-
-    private void handlePlayerJoins(MinecraftServer minecraftServer) {
-        Set<UUID> onlineNow = new HashSet<>();
-        for (ServerPlayer player : minecraftServer.getPlayerList().getPlayers()) {
-            UUID id = player.getUUID();
-            onlineNow.add(id);
-            if (observedOnlinePlayers.add(id)) {
-                handleJoinSpawn(player);
-            }
-        }
-        observedOnlinePlayers.retainAll(onlineNow);
     }
 
     private void purgeExpiredRequests() {
@@ -316,6 +314,9 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             sendRaw(ctx.getSource(), "/rtp - Random teleport");
         }
         sendRaw(ctx.getSource(), "/spawn - Teleport near spawn");
+        if (config.tpabackEnabled) {
+            sendRaw(ctx.getSource(), "/tpaback - Teleport to your last death location");
+        }
         appendCostsHelp(ctx.getSource());
         sendRaw(ctx.getSource(), "-----------------------");
         return Command.SINGLE_SUCCESS;
@@ -343,12 +344,18 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                         int amount = realmVal >= 0 ? realmVal : globalVal;
                         if (amount <= 0) continue;
                         cost = amount + " XP level" + (amount == 1 ? "" : "s");
-                    } else {
+                    } else if (config.costMode == CostMode.ITEM) {
                         int realmVal = propInt(rawConfig, -1, "settings.costs.item.rtp." + realm);
                         int globalVal = propInt(rawConfig, 0, "settings.costs.item.rtp");
                         int amount = realmVal >= 0 ? realmVal : globalVal;
                         if (amount <= 0) continue;
                         cost = amount + " " + displayMaterial(config.costItemName);
+                    } else {
+                        double realmVal = propDouble(rawConfig, -1, "settings.costs.currency.rtp." + realm);
+                        double globalVal = propDouble(rawConfig, 0, "settings.costs.currency.rtp");
+                        double amount = realmVal >= 0 ? realmVal : globalVal;
+                        if (amount <= 0) continue;
+                        cost = String.format(Locale.US, "%.2f", amount);
                     }
                     lines.add(commandFor(kind) + " (" + label + ") - " + cost);
                 }
@@ -360,12 +367,18 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                         continue;
                     }
                     cost = amount + " XP level" + (amount == 1 ? "" : "s");
-                } else {
+                } else if (config.costMode == CostMode.ITEM) {
                     int amount = config.itemCost(kind);
                     if (amount <= 0) {
                         continue;
                     }
                     cost = amount + " " + displayMaterial(config.costItemName);
+                } else {
+                    double amount = config.currencyCost(kind);
+                    if (amount <= 0) {
+                        continue;
+                    }
+                    cost = String.format(Locale.US, "%.2f", amount);
                 }
                 lines.add(commandFor(kind) + " - " + cost);
             }
@@ -384,6 +397,16 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         if (v == null) return def;
         try {
             return Integer.parseInt(v.trim());
+        } catch (NumberFormatException e) {
+            return def;
+        }
+    }
+
+    private static double propDouble(Properties p, double def, String key) {
+        String v = p.getProperty(key);
+        if (v == null) return def;
+        try {
+            return Double.parseDouble(v.trim());
         } catch (NumberFormatException e) {
             return def;
         }
@@ -414,6 +437,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             path.startsWith("settings.rtp.default_max_distance.") ||
             path.startsWith("settings.costs.xp_levels.rtp.") ||
             path.startsWith("settings.costs.item.rtp.") ||
+            path.startsWith("settings.costs.currency.rtp.") ||
             path.startsWith("settings.rtp.blacklisted_worlds.") ||
             path.startsWith("settings.dimension_restrictions.disable_rtp.") ||
             path.startsWith("settings.dimension_restrictions.disable_teleport.");
@@ -446,6 +470,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             path.startsWith("settings.rtp.default_max_distance.") ||
             path.startsWith("settings.costs.xp_levels.rtp.") ||
             path.startsWith("settings.costs.item.rtp.") ||
+            path.startsWith("settings.costs.currency.rtp.") ||
             path.startsWith("settings.rtp.blacklisted_worlds.") ||
             path.startsWith("settings.dimension_restrictions.disable_rtp.") ||
             path.startsWith("settings.dimension_restrictions.disable_teleport.");
@@ -460,6 +485,8 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                 current = "false";
             } else if (isIntegerPath(path)) {
                 current = "0";
+            } else if (path.contains(".costs.currency.")) {
+                current = "0.0";
             } else if (isCostModePath(path)) {
                 current = "NONE";
             } else if (isLandingModePath(path)) {
@@ -496,8 +523,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             || path.equals("settings.cancel_on_damage")
             || path.equals("settings.costs.enabled")
             || path.equals("settings.rtp.rtp_to_overworld")
-            || path.equals("settings.spawn.enabled")
-            || path.equals("settings.spawn.first_join_only");
+            || path.equals("settings.spawn.enabled");
     }
 
     private boolean isIntegerPath(String path) {
@@ -516,7 +542,8 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             || path.equals("settings.spawn.y")
             || path.equals("settings.spawn.z")
             || path.equals("settings.spawn.yaw")
-            || path.equals("settings.spawn.pitch");
+            || path.equals("settings.spawn.pitch")
+            || path.contains(".costs.currency.");
     }
 
     private boolean isCostModePath(String path) { return path.equals("settings.costs.mode"); }
@@ -549,7 +576,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         }
         if (isCostModePath(path)) {
             String upper = value.toUpperCase(Locale.ROOT);
-            if (!upper.equals("NONE") && !upper.equals("XP_LEVELS") && !upper.equals("ITEM")) {
+            if (!upper.equals("NONE") && !upper.equals("XP_LEVELS") && !upper.equals("ITEM") && !upper.equals("CURRENCY")) {
                 return null;
             }
             return upper;
@@ -748,7 +775,19 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                 return 0;
             }
             pendingByReceiver.remove(receiver.getUUID());
-            queueDelayedTeleport(sender, TeleportKind.TPA, () -> receiver.serverLevel(), () -> receiver.position().x, () -> receiver.position().y, () -> receiver.position().z, sender.getYRot(), sender.getXRot());
+            queueDelayedTeleport(
+                sender,
+                sender,
+                TeleportKind.TPA,
+                () -> receiver.serverLevel(),
+                () -> receiver.position().x,
+                () -> receiver.position().y,
+                () -> receiver.position().z,
+                sender.getYRot(),
+                sender.getXRot(),
+                () -> {},
+                receiver
+            );
         } else {
             if (!config.tpaHereEnabled) {
                 send(receiver, "feature_tpahere_disabled");
@@ -767,7 +806,19 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                 return 0;
             }
             pendingByReceiver.remove(receiver.getUUID());
-            queueDelayedTeleport(receiver, sender, TeleportKind.TPAHERE, () -> sender.serverLevel(), () -> sender.position().x, () -> sender.position().y, () -> sender.position().z, receiver.getYRot(), receiver.getXRot());
+            queueDelayedTeleport(
+                receiver,
+                sender,
+                TeleportKind.TPAHERE,
+                () -> sender.serverLevel(),
+                () -> sender.position().x,
+                () -> sender.position().y,
+                () -> sender.position().z,
+                receiver.getYRot(),
+                receiver.getXRot(),
+                () -> {},
+                sender
+            );
         }
 
         send(receiver, "request_accepted");
@@ -1022,6 +1073,10 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         return SharedSuggestionProvider.suggest(realmOptions(ctx.getSource().getServer()), builder);
     }
 
+    private CompletableFuture<Suggestions> suggestOfflineNames(CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {
+        return SharedSuggestionProvider.suggest(store.offlineLocations.keySet().stream().sorted().toList(), builder);
+    }
+
     private List<String> realmOptions(MinecraftServer minecraftServer) {
         List<String> options = new ArrayList<>(List.of("overworld", "nether", "end"));
         for (ServerLevel level : minecraftServer.getAllLevels()) {
@@ -1083,6 +1138,34 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         if (teleport(player, level, pos.x, pos.y, pos.z, pos.yaw, pos.pitch)) {
             send(player, "teleport_success");
         }
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private int tpaback(CommandContext<CommandSourceStack> ctx) {
+        if (!ensureAppEnabled(ctx.getSource())) {
+            return 0;
+        }
+        if (!config.tpabackEnabled) {
+            send(ctx.getSource(), "feature_tpaback_disabled");
+            return 0;
+        }
+        ServerPlayer player = ctx.getSource().getPlayer();
+        if (player == null) {
+            send(ctx.getSource(), "player_only");
+            return 0;
+        }
+        Position pos = store.deathLocations.get(player.getUUID().toString());
+        if (pos == null) {
+            send(player, "death_missing");
+            return 0;
+        }
+        MinecraftServer minecraftServer = Objects.requireNonNull(player.getServer());
+        ServerLevel level = minecraftServer.getLevel(ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(pos.dimension)));
+        if (level == null) {
+            level = minecraftServer.overworld();
+        }
+        final ServerLevel finalLevel = level;
+        queueDelayedTeleport(player, TeleportKind.BACK, () -> finalLevel, () -> pos.x, () -> pos.y, () -> pos.z, pos.yaw, pos.pitch);
         return Command.SINGLE_SUCCESS;
     }
 
@@ -1359,7 +1442,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
     }
 
     private void queueDelayedTeleport(ServerPlayer player, TeleportKind kind, LevelSupplier level, DoubleSupplier x, DoubleSupplier y, DoubleSupplier z, float yaw, float pitch) {
-        queueDelayedTeleport(player, player, kind, level, x, y, z, yaw, pitch, () -> {});
+        queueDelayedTeleport(player, player, kind, level, x, y, z, yaw, pitch, () -> {}, null);
     }
 
     private void queueDelayedTeleport(
@@ -1372,10 +1455,21 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         DoubleSupplier z,
         float yaw,
         float pitch,
-        Runnable onSuccess
+        Runnable onSuccess,
+        ServerPlayer notifyPlayer
     ) {
         if (config.teleportDisabledIn(player.serverLevel())) {
             send(player, "teleport_disabled_dimension", Map.of("dimension", player.serverLevel().dimension().location().toString()));
+            return;
+        }
+        ChargeResult preview = previewCharge(payer, kind);
+        if (!preview.success) {
+            String template = messages.getOrDefault("cost_failed", "cost_failed");
+            if (!template.contains("%required%")) {
+                sendRaw(payer, "You require " + preview.required + " to teleport.");
+            } else {
+                send(payer, "cost_failed", Map.of("required", preview.required));
+            }
             return;
         }
         pendingTeleports.remove(player.getUUID());
@@ -1405,7 +1499,15 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
 
         pendingTeleports.put(
             player.getUUID(),
-            new PendingTeleport(BlockPos.containing(player.getX(), player.getY(), player.getZ()), delayTicks, supplier, onSuccess, payer.getUUID(), kind)
+            new PendingTeleport(
+                BlockPos.containing(player.getX(), player.getY(), player.getZ()),
+                delayTicks,
+                supplier,
+                onSuccess,
+                payer.getUUID(),
+                kind,
+                notifyPlayer == null ? null : notifyPlayer.getUUID()
+            )
         );
     }
 
@@ -1420,7 +1522,22 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         float yaw,
         float pitch
     ) {
-        queueDelayedTeleport(player, payer, kind, level, x, y, z, yaw, pitch, () -> {});
+        queueDelayedTeleport(player, payer, kind, level, x, y, z, yaw, pitch, () -> {}, null);
+    }
+
+    private void queueDelayedTeleport(
+        ServerPlayer player,
+        ServerPlayer payer,
+        TeleportKind kind,
+        LevelSupplier level,
+        DoubleSupplier x,
+        DoubleSupplier y,
+        DoubleSupplier z,
+        float yaw,
+        float pitch,
+        Runnable onSuccess
+    ) {
+        queueDelayedTeleport(player, payer, kind, level, x, y, z, yaw, pitch, onSuccess, null);
     }
 
     private ChargeResult charge(ServerPlayer player, TeleportKind kind) {
@@ -1447,6 +1564,13 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                 player.giveExperienceLevels(-cost);
             }
             return ChargeResult.okPaid(cost + " XP level" + (cost == 1 ? "" : "s"));
+        }
+        if (config.costMode == CostMode.CURRENCY) {
+            double amount = config.currencyCost(kind, player.serverLevel());
+            if (amount <= 0) {
+                return ChargeResult.ok();
+            }
+            return ChargeResult.fail(String.format(Locale.US, "%.2f currency (unsupported on Fabric runtime)", amount));
         }
 
         int amount = config.itemCost(kind, player.serverLevel());
@@ -1477,8 +1601,16 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
     }
 
     private void cancelPending(ServerPlayer player, String messageKey) {
-        if (pendingTeleports.remove(player.getUUID()) != null) {
+        PendingTeleport pending = pendingTeleports.remove(player.getUUID());
+        if (pending != null) {
             send(player, messageKey);
+            if (pending.notifyPlayerId != null && server != null) {
+                ServerPlayer notify = server.getPlayerList().getPlayer(pending.notifyPlayerId);
+                if (notify != null) {
+                    String reason = messages.getOrDefault(messageKey, messageKey);
+                    sendRaw(notify, player.getGameProfile().getName() + "'s teleport was cancelled (" + reason + ")");
+                }
+            }
             play(player, "cancelled");
         }
     }
@@ -1699,19 +1831,6 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         return level.dimension().location().toString();
     }
 
-    private void handleJoinSpawn(ServerPlayer player) {
-        String key = player.getUUID().toString();
-        boolean seen = store.joinedPlayers.contains(key);
-        if (config.spawnEnabled && (!config.spawnFirstJoinOnly || !seen)) {
-            TeleportTarget target = configuredSpawnTarget(player, player.serverLevel());
-            player.teleportTo(target.level, target.x, target.y, target.z, target.yaw, target.pitch);
-        }
-        if (!seen) {
-            store.joinedPlayers.add(key);
-            saveStore();
-        }
-    }
-
     private TeleportTarget configuredSpawnTarget(ServerPlayer player, ServerLevel fallbackLevel) {
         MinecraftServer minecraftServer = Objects.requireNonNull(player.getServer());
         ServerLevel level = resolveSpawnWorld(minecraftServer, config.spawnWorld);
@@ -1783,6 +1902,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             case HOME -> config.homesEnabled;
             case RTP -> config.rtpEnabled;
             case SPAWN -> true;
+            case BACK -> config.tpabackEnabled;
         };
     }
 
@@ -1793,6 +1913,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             case HOME -> "/tphome";
             case RTP -> "/rtp";
             case SPAWN -> "/spawn";
+            case BACK -> "/tpaback";
         };
     }
 
@@ -1952,7 +2073,6 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         defaults.put("settings.dimension_restrictions.disable_rtp", "");
         defaults.put("settings.dimension_restrictions.disable_teleport", "");
         defaults.put("settings.spawn.enabled", "true");
-        defaults.put("settings.spawn.first_join_only", "true");
         defaults.put("settings.spawn.x", "0");
         defaults.put("settings.spawn.y", "100");
         defaults.put("settings.spawn.z", "0");
@@ -1969,19 +2089,28 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         defaults.put("settings.features.tpahere", "true");
         defaults.put("settings.features.homes", "true");
         defaults.put("settings.features.rtp", "true");
+        defaults.put("settings.features.tpaback", "true");
         defaults.put("settings.costs.enabled", "false");
         defaults.put("settings.costs.mode", "NONE");
         defaults.put("settings.costs.item.material", "ENDER_PEARL");
         defaults.put("settings.costs.xp_levels.tpa", "4");
         defaults.put("settings.costs.xp_levels.tpahere", "4");
         defaults.put("settings.costs.xp_levels.home", "16");
+        defaults.put("settings.costs.xp_levels.back", "0");
         defaults.put("settings.costs.xp_levels.rtp", "30");
         defaults.put("settings.costs.xp_levels.spawn", "8");
         defaults.put("settings.costs.item.tpa", "2");
         defaults.put("settings.costs.item.tpahere", "2");
         defaults.put("settings.costs.item.home", "20");
+        defaults.put("settings.costs.item.back", "0");
         defaults.put("settings.costs.item.rtp", "50");
         defaults.put("settings.costs.item.spawn", "10");
+        defaults.put("settings.costs.currency.tpa", "0.0");
+        defaults.put("settings.costs.currency.tpahere", "0.0");
+        defaults.put("settings.costs.currency.home", "0.0");
+        defaults.put("settings.costs.currency.back", "0.0");
+        defaults.put("settings.costs.currency.rtp", "0.0");
+        defaults.put("settings.costs.currency.spawn", "0.0");
         defaults.put("sounds.request_sent", "ENTITY_EXPERIENCE_ORB_PICKUP");
         defaults.put("sounds.request_received", "BLOCK_NOTE_BLOCK_PLING");
         defaults.put("sounds.countdown", "BLOCK_BELL_USE");
@@ -1997,11 +2126,11 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
 
     private enum RequestType { TPA, TPAHERE }
 
-    private enum TeleportKind { TPA, TPAHERE, HOME, RTP, SPAWN }
+    private enum TeleportKind { TPA, TPAHERE, HOME, RTP, SPAWN, BACK }
 
     private enum LandingMode { EXACT, RANDOM_OFFSET }
 
-    private enum CostMode { NONE, XP_LEVELS, ITEM }
+    private enum CostMode { NONE, XP_LEVELS, ITEM, CURRENCY }
 
     private record ChargeResult(boolean success, String required, String paid) {
         private static ChargeResult ok() { return new ChargeResult(true, "", ""); }
@@ -2030,14 +2159,24 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         private final Runnable onSuccess;
         private final UUID payerId;
         private final TeleportKind kind;
+        private final UUID notifyPlayerId;
 
-        private PendingTeleport(BlockPos startPos, int ticksLeft, TargetSupplier targetSupplier, Runnable onSuccess, UUID payerId, TeleportKind kind) {
+        private PendingTeleport(
+            BlockPos startPos,
+            int ticksLeft,
+            TargetSupplier targetSupplier,
+            Runnable onSuccess,
+            UUID payerId,
+            TeleportKind kind,
+            UUID notifyPlayerId
+        ) {
             this.startPos = startPos;
             this.ticksLeft = ticksLeft;
             this.targetSupplier = targetSupplier;
             this.onSuccess = onSuccess;
             this.payerId = payerId;
             this.kind = kind;
+            this.notifyPlayerId = notifyPlayerId;
         }
     }
 
@@ -2080,10 +2219,10 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         boolean tpaHereEnabled = true;
         boolean homesEnabled = true;
         boolean rtpEnabled = true;
+        boolean tpabackEnabled = true;
         boolean rtpToOverworld = false;
         String overworldName = "world";
         boolean spawnEnabled = true;
-        boolean spawnFirstJoinOnly = true;
         double spawnX = 0.0;
         double spawnY = 100.0;
         double spawnZ = 0.0;
@@ -2096,8 +2235,10 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         Item costItem = Items.ENDER_PEARL;
         Map<TeleportKind, Integer> xpCosts = new EnumMap<>(TeleportKind.class);
         Map<TeleportKind, Integer> itemCosts = new EnumMap<>(TeleportKind.class);
+        Map<TeleportKind, Double> currencyCosts = new EnumMap<>(TeleportKind.class);
         Map<String, Map<TeleportKind, Integer>> xpCostsByDimension = new HashMap<>();
         Map<String, Map<TeleportKind, Integer>> itemCostsByDimension = new HashMap<>();
+        Map<String, Map<TeleportKind, Double>> currencyCostsByDimension = new HashMap<>();
         Map<String, SoundEvent> sounds = new HashMap<>();
         Map<String, ParticleOptions> effects = new HashMap<>();
 
@@ -2122,8 +2263,8 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             c.tpaHereEnabled = boolProp(p, true, "settings.features.tpahere", "feature_tpahere");
             c.homesEnabled = boolProp(p, true, "settings.features.homes", "feature_homes");
             c.rtpEnabled = boolProp(p, true, "settings.features.rtp", "feature_rtp");
+            c.tpabackEnabled = boolProp(p, true, "settings.features.tpaback", "feature_tpaback");
             c.spawnEnabled = boolProp(p, true, "settings.spawn.enabled");
-            c.spawnFirstJoinOnly = boolProp(p, true, "settings.spawn.first_join_only");
             c.spawnX = doubleProp(p, 0.0, "settings.spawn.x");
             c.spawnY = doubleProp(p, 100.0, "settings.spawn.y");
             c.spawnZ = doubleProp(p, 0.0, "settings.spawn.z");
@@ -2139,6 +2280,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                 String key = kind.name().toLowerCase(Locale.ROOT);
                 c.xpCosts.put(kind, intProp(p, 0, "settings.costs.xp_levels." + key));
                 c.itemCosts.put(kind, intProp(p, 0, "settings.costs.item." + key));
+                c.currencyCosts.put(kind, doubleProp(p, 0, "settings.costs.currency." + key));
             }
 
             // Parse any per-dimension cost overrides using keys like
@@ -2178,6 +2320,20 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                         c.rtpDisabledDimensions.add(dim);
                     }
                 }
+                if (rawKey.startsWith("settings.costs.currency.")) {
+                    String rest = rawKey.substring("settings.costs.currency.".length());
+                    int idx = rest.indexOf('.');
+                    if (idx > 0) {
+                        String dim = rest.substring(0, idx);
+                        String kindKey = rest.substring(idx + 1);
+                        try {
+                            TeleportKind kind = TeleportKind.valueOf(kindKey.toUpperCase(Locale.ROOT));
+                            double val = doubleProp(p, 0, rawKey);
+                            c.currencyCostsByDimension.computeIfAbsent(dim, d -> new EnumMap<>(TeleportKind.class)).put(kind, val);
+                        } catch (IllegalArgumentException ignored) {
+                        }
+                    }
+                }
                 if (rawKey.startsWith("settings.dimension_restrictions.disable_teleport.")) {
                     String dim = normalizeDimension(rawKey.substring("settings.dimension_restrictions.disable_teleport.".length()));
                     if (boolProp(p, false, rawKey) && !dim.isBlank()) {
@@ -2213,11 +2369,15 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                 String dim = e.getValue();
                 int rxp = intProp(p, 0, "settings.costs.xp_levels.rtp." + realm);
                 int rit = intProp(p, 0, "settings.costs.item.rtp." + realm);
+                double rcur = doubleProp(p, 0, "settings.costs.currency.rtp." + realm);
                 if (rxp > 0) {
                     c.xpCostsByDimension.computeIfAbsent(dim, d -> new EnumMap<>(TeleportKind.class)).put(TeleportKind.RTP, rxp);
                 }
                 if (rit > 0) {
                     c.itemCostsByDimension.computeIfAbsent(dim, d -> new EnumMap<>(TeleportKind.class)).put(TeleportKind.RTP, rit);
+                }
+                if (rcur > 0) {
+                    c.currencyCostsByDimension.computeIfAbsent(dim, d -> new EnumMap<>(TeleportKind.class)).put(TeleportKind.RTP, rcur);
                 }
             }
 
@@ -2347,6 +2507,10 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             return itemCosts.getOrDefault(kind, 0);
         }
 
+        double currencyCost(TeleportKind kind) {
+            return currencyCosts.getOrDefault(kind, 0.0);
+        }
+
         int xpCost(TeleportKind kind, ServerLevel level) {
             if (level == null) return xpCost(kind);
             String dim = level.dimension().location().toString();
@@ -2365,6 +2529,16 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                 return map.get(kind);
             }
             return itemCost(kind);
+        }
+
+        double currencyCost(TeleportKind kind, ServerLevel level) {
+            if (level == null) return currencyCost(kind);
+            String dim = level.dimension().location().toString();
+            Map<TeleportKind, Double> map = currencyCostsByDimension.get(dim);
+            if (map != null && map.containsKey(kind)) {
+                return map.get(kind);
+            }
+            return currencyCost(kind);
         }
 
         int rtpMin(ServerLevel level) {
@@ -2466,6 +2640,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         Map<String, String> defaultHomes = new HashMap<>();
         Map<String, Integer> homeLimits = new HashMap<>();
         Map<String, Position> offlineLocations = new HashMap<>();
+        Map<String, Position> deathLocations = new HashMap<>();
         Set<String> joinedPlayers = new HashSet<>();
     }
 

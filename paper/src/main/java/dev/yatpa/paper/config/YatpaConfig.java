@@ -20,7 +20,8 @@ public class YatpaConfig {
     public enum CostMode {
         NONE,
         XP_LEVELS,
-        ITEM
+        ITEM,
+        CURRENCY
     }
 
     private final int maxHomesDefault;
@@ -42,6 +43,7 @@ public class YatpaConfig {
     private final boolean tpaHereEnabled;
     private final boolean homesEnabled;
     private final boolean rtpEnabled;
+    private final boolean tpabackEnabled;
     private final boolean rtpToOverworld;
     private final String overworldName;
     private final boolean costsEnabled;
@@ -49,16 +51,18 @@ public class YatpaConfig {
     private final Material costItem;
     private final Map<TeleportKind, Integer> xpCosts;
     private final Map<TeleportKind, Integer> itemCosts;
+    private final Map<TeleportKind, Double> currencyCosts;
     private final Map<String, Integer> realmXpRtpCosts;
     private final Map<String, Integer> realmItemRtpCosts;
+    private final Map<String, Double> realmCurrencyRtpCosts;
     private final Map<String, Map<TeleportKind, Integer>> xpCostsByWorld;
     private final Map<String, Map<TeleportKind, Integer>> itemCostsByWorld;
+    private final Map<String, Map<TeleportKind, Double>> currencyCostsByWorld;
     private final Set<String> rtpDisabledDimensions;
     private final Set<String> teleportDisabledDimensions;
     private final Map<String, Sound> sounds;
     private final Map<String, Particle> effects;
     private final Boolean spawnEnabled;
-    private final Boolean spawnFirstJoinOnly;
     private final Double spawnX;
     private final Double spawnY;
     private final Double spawnZ;
@@ -84,6 +88,7 @@ public class YatpaConfig {
             boolean tpaHereEnabled,
             boolean homesEnabled,
             boolean rtpEnabled,
+            boolean tpabackEnabled,
             boolean costsEnabled,
             boolean rtpToOverworld,
             String overworldName,
@@ -91,18 +96,20 @@ public class YatpaConfig {
             Material costItem,
             Map<TeleportKind, Integer> xpCosts,
             Map<TeleportKind, Integer> itemCosts,
+            Map<TeleportKind, Double> currencyCosts,
             Map<String, Sound> sounds,
             Map<String, Particle> effects,
             Map<String, Map<TeleportKind, Integer>> xpCostsByWorld,
             Map<String, Map<TeleportKind, Integer>> itemCostsByWorld,
+            Map<String, Map<TeleportKind, Double>> currencyCostsByWorld,
             Map<String, Integer> realmXpRtpCosts,
             Map<String, Integer> realmItemRtpCosts,
+            Map<String, Double> realmCurrencyRtpCosts,
             Map<String, Integer> realmRtpMin,
             Map<String, Integer> realmRtpMax,
             Set<String> rtpDisabledDimensions,
             Set<String> teleportDisabledDimensions,
             Boolean spawnEnabled,
-            Boolean spawnFirstJoinOnly,
             Double spawnX,
             Double spawnY,
             Double spawnZ,
@@ -126,6 +133,7 @@ public class YatpaConfig {
         this.tpaHereEnabled = tpaHereEnabled;
         this.homesEnabled = homesEnabled;
         this.rtpEnabled = rtpEnabled;
+        this.tpabackEnabled = tpabackEnabled;
         this.rtpToOverworld = rtpToOverworld;
         this.overworldName = overworldName;
         this.costsEnabled = costsEnabled;
@@ -133,10 +141,13 @@ public class YatpaConfig {
         this.costItem = costItem;
         this.xpCosts = xpCosts;
         this.itemCosts = itemCosts;
+        this.currencyCosts = currencyCosts;
         this.xpCostsByWorld = xpCostsByWorld != null ? xpCostsByWorld : new java.util.HashMap<>();
         this.itemCostsByWorld = itemCostsByWorld != null ? itemCostsByWorld : new java.util.HashMap<>();
+        this.currencyCostsByWorld = currencyCostsByWorld != null ? currencyCostsByWorld : new java.util.HashMap<>();
         this.realmXpRtpCosts = realmXpRtpCosts != null ? realmXpRtpCosts : new java.util.HashMap<>();
         this.realmItemRtpCosts = realmItemRtpCosts != null ? realmItemRtpCosts : new java.util.HashMap<>();
+        this.realmCurrencyRtpCosts = realmCurrencyRtpCosts != null ? realmCurrencyRtpCosts : new java.util.HashMap<>();
         this.realmRtpMin = realmRtpMin != null ? realmRtpMin : new java.util.HashMap<>();
         this.realmRtpMax = realmRtpMax != null ? realmRtpMax : new java.util.HashMap<>();
         this.rtpDisabledDimensions = rtpDisabledDimensions != null ? rtpDisabledDimensions : new HashSet<>();
@@ -145,7 +156,6 @@ public class YatpaConfig {
         this.sounds = sounds;
         this.effects = effects;
         this.spawnEnabled = spawnEnabled;
-        this.spawnFirstJoinOnly = spawnFirstJoinOnly;
         this.spawnX = spawnX;
         this.spawnY = spawnY;
         this.spawnZ = spawnZ;
@@ -157,10 +167,13 @@ public class YatpaConfig {
     public static YatpaConfig from(FileConfiguration config) {
         Map<TeleportKind, Integer> xp = new EnumMap<>(TeleportKind.class);
         Map<TeleportKind, Integer> items = new EnumMap<>(TeleportKind.class);
+        Map<TeleportKind, Double> currency = new EnumMap<>(TeleportKind.class);
         Map<String, Map<TeleportKind, Integer>> xpByWorld = new java.util.HashMap<>();
         Map<String, Map<TeleportKind, Integer>> itemByWorld = new java.util.HashMap<>();
+        Map<String, Map<TeleportKind, Double>> currencyByWorld = new java.util.HashMap<>();
         Map<String, Integer> realmXpRtp = new java.util.HashMap<>();
         Map<String, Integer> realmItemRtp = new java.util.HashMap<>();
+        Map<String, Double> realmCurrencyRtp = new java.util.HashMap<>();
         Map<String, Integer> realmMin = new java.util.HashMap<>();
         Map<String, Integer> realmMax = new java.util.HashMap<>();
         Set<String> blockedRtp = parseDimensionRestrictions(config, "settings.dimension_restrictions.disable_rtp");
@@ -176,6 +189,7 @@ public class YatpaConfig {
             String key = kind.name().toLowerCase();
             xp.put(kind, config.getInt("settings.costs.xp_levels." + key, 0));
             items.put(kind, config.getInt("settings.costs.item." + key, 0));
+            currency.put(kind, config.getDouble("settings.costs.currency." + key, 0));
         }
 
         Map<String, Sound> sounds = new java.util.HashMap<>();
@@ -219,6 +233,20 @@ public class YatpaConfig {
                     }
                 }
             }
+            if (full.startsWith("settings.costs.currency.")) {
+                String rest = full.substring("settings.costs.currency.".length());
+                int idx = rest.indexOf('.');
+                if (idx > 0) {
+                    String world = rest.substring(0, idx);
+                    String kindKey = rest.substring(idx + 1);
+                    try {
+                        TeleportKind kind = TeleportKind.valueOf(kindKey.toUpperCase());
+                        double val = config.getDouble(full, 0);
+                        currencyByWorld.computeIfAbsent(world, w -> new EnumMap<>(TeleportKind.class)).put(kind, val);
+                    } catch (IllegalArgumentException ignored) {
+                    }
+                }
+            }
         }
 
         // Parse realm-friendly RTP cost overrides (overworld/nether/end)
@@ -228,6 +256,9 @@ public class YatpaConfig {
         realmItemRtp.put("overworld", config.getInt("settings.costs.item.rtp.overworld", 0));
         realmItemRtp.put("nether", config.getInt("settings.costs.item.rtp.nether", 0));
         realmItemRtp.put("end", config.getInt("settings.costs.item.rtp.end", 0));
+        realmCurrencyRtp.put("overworld", config.getDouble("settings.costs.currency.rtp.overworld", 0));
+        realmCurrencyRtp.put("nether", config.getDouble("settings.costs.currency.rtp.nether", 0));
+        realmCurrencyRtp.put("end", config.getDouble("settings.costs.currency.rtp.end", 0));
 
         // Parse realm-friendly RTP distance overrides
         if (config.isInt("settings.rtp.realm_min_distance.overworld"))
@@ -261,6 +292,7 @@ public class YatpaConfig {
                 config.getBoolean("settings.features.tpahere", true),
                 config.getBoolean("settings.features.homes", true),
                 config.getBoolean("settings.features.rtp", true),
+                config.getBoolean("settings.features.tpaback", true),
                 config.getBoolean("settings.costs.enabled", false),
                 config.getBoolean("settings.rtp.rtp_to_overworld", false),
                 config.getString("settings.rtp.overworld_name", "world"),
@@ -268,18 +300,20 @@ public class YatpaConfig {
                 parseMaterial(config.getString("settings.costs.item.material", "ENDER_PEARL")),
                 xp,
                 items,
+                currency,
                 sounds,
                 effects,
                 xpByWorld,
                 itemByWorld,
+                currencyByWorld,
                 realmXpRtp,
                 realmItemRtp,
+                realmCurrencyRtp,
                 realmMin,
                 realmMax,
                 blockedRtp,
                 blockedTeleport,
                 config.getBoolean("settings.spawn.enabled", true),
-                config.getBoolean("settings.spawn.first_join_only", true),
                 config.getDouble("settings.spawn.x", 0),
                 config.getDouble("settings.spawn.y", 100),
                 config.getDouble("settings.spawn.z", 0),
@@ -389,6 +423,27 @@ public class YatpaConfig {
         if (map != null && map.containsKey(kind))
             return map.get(kind);
         return itemCost(kind);
+    }
+
+    public double currencyCost(TeleportKind kind, org.bukkit.World world) {
+        if (world == null)
+            return currencyCost(kind);
+        if (kind == dev.yatpa.paper.data.TeleportKind.RTP) {
+            String env = switch (world.getEnvironment()) {
+                case NORMAL -> "overworld";
+                case NETHER -> "nether";
+                case THE_END -> "end";
+                default -> "";
+            };
+            Double v = realmCurrencyRtpCosts.get(env);
+            if (v != null && v > 0)
+                return v;
+        }
+        String w = world.getName();
+        Map<TeleportKind, Double> map = currencyCostsByWorld.get(w);
+        if (map != null && map.containsKey(kind))
+            return map.get(kind);
+        return currencyCost(kind);
     }
 
     private static Sound parseSound(String name) {
@@ -531,6 +586,10 @@ public class YatpaConfig {
         return rtpEnabled;
     }
 
+    public boolean tpabackEnabled() {
+        return tpabackEnabled;
+    }
+
     public boolean costsEnabled() {
         return costsEnabled;
     }
@@ -559,6 +618,10 @@ public class YatpaConfig {
         return itemCosts.getOrDefault(kind, 0);
     }
 
+    public double currencyCost(TeleportKind kind) {
+        return currencyCosts.getOrDefault(kind, 0d);
+    }
+
     public Sound sound(String key) {
         return sounds.get(key);
     }
@@ -569,10 +632,6 @@ public class YatpaConfig {
 
     public Boolean spawnEnabled() {
         return spawnEnabled;
-    }
-
-    public Boolean spawnFirstJoinOnly() {
-        return spawnFirstJoinOnly;
     }
 
     public Double spawnX() {

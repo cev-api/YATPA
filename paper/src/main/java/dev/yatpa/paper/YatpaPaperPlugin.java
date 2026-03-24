@@ -11,11 +11,13 @@ import dev.yatpa.paper.service.RequestService;
 import dev.yatpa.paper.service.TeleportService;
 import java.io.File;
 import java.util.Map;
+import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.event.HandlerList;
+import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public class YatpaPaperPlugin extends JavaPlugin {
@@ -24,6 +26,7 @@ public class YatpaPaperPlugin extends JavaPlugin {
     private DataStore dataStore;
     private RequestService requests;
     private TeleportService teleports;
+    private Economy economy;
 
     @Override
     public void onEnable() {
@@ -45,15 +48,17 @@ public class YatpaPaperPlugin extends JavaPlugin {
         this.messages = new XmlMessages();
         this.messages.load(new File(getDataFolder(), "messages.xml"));
         this.configModel = YatpaConfig.from(getConfig());
+        this.economy = setupEconomy();
         this.dataStore = new DataStore(getDataFolder());
         this.requests = new RequestService(configModel.requestTimeoutSeconds(), configModel.requestCooldownSeconds());
-        this.teleports = new TeleportService(this, configModel, messages, new CostService(configModel));
+        this.teleports = new TeleportService(this, configModel, messages, new CostService(configModel, economy));
 
         SettingsGui settingsGui = new SettingsGui(this, messages);
         YatpaCommandHandler handler = new YatpaCommandHandler(this, messages, configModel, dataStore, requests,
                 teleports, settingsGui);
         for (String command : new String[] { "tpa", "yatpa", "tpahelp", "tphelp", "tpahere", "tpaccept", "tpdeny",
-                "tpatoggle", "tpablock", "tpaunblock", "tphome", "rtp", "spawn", "ytp", "tpoffline", "setspawn" }) {
+                "tpatoggle", "tpablock", "tpaunblock", "tphome", "rtp", "spawn", "ytp", "tpoffline", "tpaback",
+                "setspawn" }) {
             PluginCommand pluginCommand = getCommand(command);
             if (pluginCommand != null) {
                 pluginCommand.setExecutor(handler);
@@ -64,7 +69,7 @@ public class YatpaPaperPlugin extends JavaPlugin {
             }
         }
 
-        getServer().getPluginManager().registerEvents(new PlayerEventListener(teleports, dataStore, configModel), this);
+        getServer().getPluginManager().registerEvents(new PlayerEventListener(teleports, dataStore), this);
         getServer().getPluginManager().registerEvents(settingsGui, this);
         getServer().getScheduler().runTaskTimer(this, () -> {
             for (var expired : requests.purgeExpired()) {
@@ -98,11 +103,13 @@ public class YatpaPaperPlugin extends JavaPlugin {
     private void ensureConfigDefaults() {
         var cfg = getConfig();
         boolean changed = false;
+        changed |= migrateLegacySpawnSection(cfg);
         changed |= ensureDefault(cfg, "settings.features.enabled", true);
         changed |= ensureDefault(cfg, "settings.features.tpa", true);
         changed |= ensureDefault(cfg, "settings.features.tpahere", true);
         changed |= ensureDefault(cfg, "settings.features.homes", true);
         changed |= ensureDefault(cfg, "settings.features.rtp", true);
+        changed |= ensureDefault(cfg, "settings.features.tpaback", true);
         changed |= ensureDefault(cfg, "settings.rtp.rtp_to_overworld", false);
         changed |= ensureDefault(cfg, "settings.rtp.blacklisted_worlds", java.util.List.of());
         changed |= ensureDefault(cfg, "settings.rtp.overworld_name", "world");
@@ -119,7 +126,17 @@ public class YatpaPaperPlugin extends JavaPlugin {
         changed |= ensureDefault(cfg, "settings.spawn.yaw", 0.0f);
         changed |= ensureDefault(cfg, "settings.spawn.pitch", 0.0f);
         changed |= ensureDefault(cfg, "settings.spawn.enabled", true);
-        changed |= ensureDefault(cfg, "settings.spawn.first_join_only", false);
+        changed |= ensureDefault(cfg, "settings.costs.currency.tpa", 0.0);
+        changed |= ensureDefault(cfg, "settings.costs.currency.tpahere", 0.0);
+        changed |= ensureDefault(cfg, "settings.costs.currency.home", 0.0);
+        changed |= ensureDefault(cfg, "settings.costs.currency.rtp", 0.0);
+        changed |= ensureDefault(cfg, "settings.costs.currency.rtp.overworld", 0.0);
+        changed |= ensureDefault(cfg, "settings.costs.currency.rtp.nether", 0.0);
+        changed |= ensureDefault(cfg, "settings.costs.currency.rtp.end", 0.0);
+        changed |= ensureDefault(cfg, "settings.costs.currency.spawn", 0.0);
+        changed |= ensureDefault(cfg, "settings.costs.xp_levels.back", 0);
+        changed |= ensureDefault(cfg, "settings.costs.item.back", 0);
+        changed |= ensureDefault(cfg, "settings.costs.currency.back", 0.0);
 
         // Migrate accidental string booleans (e.g. rtp_to_overworld: "true") into real booleans.
         changed |= coerceStringBoolean(cfg, "settings.rtp.rtp_to_overworld");
@@ -127,6 +144,28 @@ public class YatpaPaperPlugin extends JavaPlugin {
         if (changed) {
             saveConfig();
         }
+    }
+
+    private boolean migrateLegacySpawnSection(FileConfiguration cfg) {
+        String legacy = "settings.costs.spawn";
+        if (!cfg.isConfigurationSection(legacy)) {
+            return false;
+        }
+        boolean changed = false;
+        for (String key : new String[] { "enabled", "x", "y", "z", "yaw", "pitch", "world" }) {
+            String legacyPath = legacy + "." + key;
+            String modernPath = "settings.spawn." + key;
+            if (!cfg.contains(legacyPath)) {
+                continue;
+            }
+            Object legacyValue = cfg.get(legacyPath);
+            if (!cfg.contains(modernPath)) {
+                cfg.set(modernPath, legacyValue);
+                changed = true;
+                continue;
+            }
+        }
+        return changed;
     }
 
     private boolean coerceStringBoolean(FileConfiguration cfg, String path) {
@@ -171,5 +210,17 @@ public class YatpaPaperPlugin extends JavaPlugin {
 
     public TeleportService teleports() {
         return teleports;
+    }
+
+    private Economy setupEconomy() {
+        RegisteredServiceProvider<Economy> registration = getServer().getServicesManager().getRegistration(Economy.class);
+        if (registration == null) {
+            if (configModel.costsEnabled() && configModel.costMode() == YatpaConfig.CostMode.CURRENCY) {
+                getLogger().warning("Currency costs are enabled but no Vault economy provider was found.");
+                getLogger().warning("Install Vault + an economy plugin (for example EssentialsX Economy).");
+            }
+            return null;
+        }
+        return registration.getProvider();
     }
 }

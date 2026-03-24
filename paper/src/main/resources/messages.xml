@@ -31,6 +31,7 @@
   <message key="home_default_set">&aDefault home set to '%name%'.</message>
   <message key="home_limit">&cYou reached your home limit (%limit%).</message>
   <message key="offline_missing">&cNo logout location found for that player.</message>
+  <message key="death_missing">&cNo death location found yet.</message>
   <message key="usage_tpa">&eUsage: /tpa &lt;player&gt;</message>
   <message key="usage_yatpa">&eUsage: /yatpa help | /yatpa reload | /yatpa settings | /yatpa gui | /yatpa set &lt;path&gt; &lt;value&gt;</message>
   <message key="usage_yatpa_help">&eUsage: /yatpa help</message>
@@ -40,6 +41,7 @@
   <message key="usage_tphome">&eUsage: /tphome [set|delete|list|default] [name]</message>
   <message key="usage_tp">&eUsage: /ytp &lt;player&gt; [target|x y z [realm]] or /ytp &lt;x y z [realm]&gt;</message>
   <message key="usage_tpoffline">&eUsage: /tpoffline &lt;player&gt;</message>
+  <message key="usage_tpaback">&eUsage: /tpaback</message>
   <message key="rtp_cooldown">&cYou must wait %seconds%s before using /rtp again.</message>
   <message key="cost_failed">&cYou do not have enough resources for this teleport. Required: %required%.</message>
   <message key="app_disabled">&cYATPA is currently disabled by server settings.</message>
@@ -47,6 +49,7 @@
   <message key="feature_tpahere_disabled">&cTeleport-here requests (/tpahere) are currently disabled.</message>
   <message key="feature_homes_disabled">&cHomes are currently disabled.</message>
   <message key="feature_rtp_disabled">&cRandom teleport (/rtp) is currently disabled.</message>
+  <message key="feature_tpaback_disabled">&cBack teleport (/tpaback) is currently disabled.</message>
   <message key="rtp_disabled_dimension">&cRandom teleport is disabled in this dimension (%dimension%).</message>
   <message key="teleport_disabled_dimension">&cTeleporting is disabled in this dimension (%dimension%).</message>
   <message key="accept_button">[Accept]</message>

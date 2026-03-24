@@ -279,7 +279,6 @@ public class YatpaConfig {
                 blockedRtp,
                 blockedTeleport,
                 config.getBoolean("settings.spawn.enabled", true),
-                config.getBoolean("settings.spawn.first_join_only", true),
                 config.getDouble("settings.spawn.x", 0),
                 config.getDouble("settings.spawn.y", 100),
                 config.getDouble("settings.spawn.z", 0),

@@ -76,7 +76,6 @@ settings:
       spawn: 10
     spawn:
       enabled: true # Enable a /spawn command that teleports players to a configurable spawn location.
-      first_join_only: true # Only teleport players to spawn on their first join.
       x: 0
       y: 100
       z: 0

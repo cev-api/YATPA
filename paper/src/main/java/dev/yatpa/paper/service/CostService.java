@@ -5,6 +5,8 @@ import dev.yatpa.paper.config.YatpaConfig;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.stream.Collectors;
+import net.milkbowl.vault.economy.Economy;
+import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
@@ -16,9 +18,11 @@ public class CostService {
     }
 
     private final YatpaConfig config;
+    private final Economy economy;
 
-    public CostService(YatpaConfig config) {
+    public CostService(YatpaConfig config, Economy economy) {
         this.config = config;
+        this.economy = economy;
     }
 
     public ChargeResult charge(Player player, TeleportKind kind) {
@@ -46,28 +50,50 @@ public class CostService {
             }
             return ChargeResult.okPaid(cost + " XP level" + (cost == 1 ? "" : "s"));
         }
-        int amount = config.itemCost(kind, player.getWorld());
-        if (amount <= 0) {
-            return ChargeResult.ok();
-        }
-        int remaining = amount;
-        ItemStack[] contents = player.getInventory().getContents();
-        for (ItemStack stack : contents) {
-            if (stack == null || stack.getType() != config.costItem()) {
-                continue;
+        if (config.costMode() == YatpaConfig.CostMode.ITEM) {
+            int amount = config.itemCost(kind, player.getWorld());
+            if (amount <= 0) {
+                return ChargeResult.ok();
             }
-            remaining -= stack.getAmount();
-            if (remaining <= 0) {
-                break;
+            int remaining = amount;
+            ItemStack[] contents = player.getInventory().getContents();
+            for (ItemStack stack : contents) {
+                if (stack == null || stack.getType() != config.costItem()) {
+                    continue;
+                }
+                remaining -= stack.getAmount();
+                if (remaining <= 0) {
+                    break;
+                }
             }
+            if (remaining > 0) {
+                return ChargeResult.fail(amount + " " + itemDisplayName(config.costItem().name()));
+            }
+            if (deduct) {
+                player.getInventory().removeItem(new ItemStack(config.costItem(), amount));
+            }
+            return ChargeResult.okPaid(amount + " " + itemDisplayName(config.costItem().name()));
         }
-        if (remaining > 0) {
-            return ChargeResult.fail(amount + " " + itemDisplayName(config.costItem().name()));
+        if (config.costMode() == YatpaConfig.CostMode.CURRENCY) {
+            double amount = config.currencyCost(kind, player.getWorld());
+            if (amount <= 0) {
+                return ChargeResult.ok();
+            }
+            if (economy == null) {
+                return ChargeResult.fail("server currency (Vault/EssentialsX) is unavailable");
+            }
+            if (!economy.has(player, amount)) {
+                return ChargeResult.fail(formatCurrency(amount));
+            }
+            if (deduct) {
+                EconomyResponse response = economy.withdrawPlayer(player, amount);
+                if (!response.transactionSuccess()) {
+                    return ChargeResult.fail(formatCurrency(amount));
+                }
+            }
+            return ChargeResult.okPaid(formatCurrency(amount));
         }
-        if (deduct) {
-            player.getInventory().removeItem(new ItemStack(config.costItem(), amount));
-        }
-        return ChargeResult.okPaid(amount + " " + itemDisplayName(config.costItem().name()));
+        return ChargeResult.ok();
     }
 
     private String itemDisplayName(String material) {
@@ -78,5 +104,12 @@ public class CostService {
             return singular;
         }
         return singular + "s";
+    }
+
+    private String formatCurrency(double amount) {
+        if (economy != null) {
+            return economy.format(amount);
+        }
+        return String.format(Locale.US, "%.2f", amount);
     }
 }

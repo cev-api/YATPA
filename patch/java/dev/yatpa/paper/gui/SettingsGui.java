@@ -250,7 +250,6 @@ public class SettingsGui implements Listener {
                 || path.equals("settings.cancel_on_damage")
                 || path.equals("settings.costs.enabled")
                 || path.equals("settings.spawn.enabled")
-                || path.equals("settings.spawn.first_join_only");
     }
 
     private boolean isIntegerPath(String path) {

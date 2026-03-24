@@ -186,6 +186,36 @@ public class DataStore {
         save(offline, offlineFile);
     }
 
+    public void setDeathLocation(UUID uuid, Location location) {
+        String path = "deaths." + uuid;
+        offline.set(path + ".world", location.getWorld().getName());
+        offline.set(path + ".x", location.getX());
+        offline.set(path + ".y", location.getY());
+        offline.set(path + ".z", location.getZ());
+        offline.set(path + ".yaw", location.getYaw());
+        offline.set(path + ".pitch", location.getPitch());
+        save(offline, offlineFile);
+    }
+
+    public Location deathLocation(UUID uuid) {
+        String path = "deaths." + uuid;
+        if (offline.get(path) == null) {
+            return null;
+        }
+        World world = Bukkit.getWorld(offline.getString(path + ".world", ""));
+        if (world == null) {
+            return null;
+        }
+        return new Location(
+            world,
+            offline.getDouble(path + ".x"),
+            offline.getDouble(path + ".y"),
+            offline.getDouble(path + ".z"),
+            (float) offline.getDouble(path + ".yaw"),
+            (float) offline.getDouble(path + ".pitch")
+        );
+    }
+
     public Location offlineLocation(String name) {
         String path = "players." + name.toLowerCase();
         if (offline.get(path) == null) {
@@ -207,5 +237,12 @@ public class DataStore {
 
     public List<String> homeNames(UUID uuid) {
         return new ArrayList<>(homes(uuid).keySet());
+    }
+
+    public List<String> offlineNames() {
+        if (!offline.isConfigurationSection("players")) {
+            return Collections.emptyList();
+        }
+        return new ArrayList<>(offline.getConfigurationSection("players").getKeys(false));
     }
 }

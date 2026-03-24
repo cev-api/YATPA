@@ -5,5 +5,6 @@ public enum TeleportKind {
     TPAHERE,
     HOME,
     RTP,
-    SPAWN
+    SPAWN,
+    BACK
 }

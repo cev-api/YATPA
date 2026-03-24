@@ -47,7 +47,8 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             "settings.features.tpa",
             "settings.features.tpahere",
             "settings.features.homes",
-            "settings.features.rtp");
+            "settings.features.rtp",
+            "settings.features.tpaback");
 
     private final YatpaPaperPlugin plugin;
     private final XmlMessages messages;
@@ -97,6 +98,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             case "spawn" -> handleSpawn(sender);
             case "ytp" -> handleYtp(sender, args);
             case "tpoffline" -> handleTpOffline(sender, args);
+            case "tpaback" -> handleTpaBack(sender, args);
             case "setspawn" -> handleSetSpawn(sender);
             default -> false;
         };
@@ -184,6 +186,9 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             sender.sendMessage("§a/rtp §7- Random teleport");
         }
         sender.sendMessage("§a/spawn §7- Teleport near spawn");
+        if (config.tpabackEnabled()) {
+            sender.sendMessage("§a/tpaback §7- Teleport to your last death location");
+        }
         if (sender.hasPermission("yatpa.op.reload")) {
             sender.sendMessage("§a/yatpa gui §7- Open admin settings GUI");
         }
@@ -204,7 +209,8 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         }
         boolean xpMode = mode.equalsIgnoreCase("XP_LEVELS");
         boolean itemMode = mode.equalsIgnoreCase("ITEM");
-        if (!xpMode && !itemMode) {
+        boolean currencyMode = mode.equalsIgnoreCase("CURRENCY");
+        if (!xpMode && !itemMode && !currencyMode) {
             return;
         }
         String itemMaterial = liveConfig.getString("settings.costs.item.material", "ENDER_PEARL");
@@ -229,13 +235,20 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                         if (amount <= 0)
                             continue;
                         cost = "§e" + amount + " XP level" + (amount == 1 ? "" : "s");
-                    } else {
+                    } else if (itemMode) {
                         int realmVal = liveConfig.getInt("settings.costs.item.rtp." + realm, -1);
                         int globalVal = liveConfig.getInt("settings.costs.item.rtp", 0);
                         int amount = realmVal >= 0 ? realmVal : globalVal;
                         if (amount <= 0)
                             continue;
                         cost = "§e" + amount + " " + displayMaterial(itemMaterial);
+                    } else {
+                        double realmVal = liveConfig.getDouble("settings.costs.currency.rtp." + realm, -1);
+                        double globalVal = liveConfig.getDouble("settings.costs.currency.rtp", 0);
+                        double amount = realmVal >= 0 ? realmVal : globalVal;
+                        if (amount <= 0)
+                            continue;
+                        cost = "§e" + formatCurrency(amount);
                     }
                     lines.add("§a" + commandFor(kind) + " §7(" + label + ") - " + cost);
                 }
@@ -247,12 +260,18 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                         continue;
                     }
                     cost = "§e" + amount + " XP level" + (amount == 1 ? "" : "s");
-                } else {
+                } else if (itemMode) {
                     int amount = liveConfig.getInt("settings.costs.item." + key, 0);
                     if (amount <= 0) {
                         continue;
                     }
                     cost = "§e" + amount + " " + displayMaterial(itemMaterial);
+                } else {
+                    double amount = liveConfig.getDouble("settings.costs.currency." + key, 0);
+                    if (amount <= 0) {
+                        continue;
+                    }
+                    cost = "§e" + formatCurrency(amount);
                 }
                 lines.add("§a" + commandFor(kind) + " §7- " + cost);
             }
@@ -273,6 +292,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             case HOME -> "/tphome";
             case RTP -> "/rtp";
             case SPAWN -> "/spawn";
+            case BACK -> "/tpaback";
         };
     }
 
@@ -284,6 +304,10 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             return singular;
         }
         return singular + "s";
+    }
+
+    private String formatCurrency(double amount) {
+        return String.format(Locale.US, "%.2f", amount);
     }
 
     private boolean handleTpaHere(CommandSender sender, String[] args) {
@@ -410,7 +434,8 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                 return true;
             }
             requests.removeFor(receiver.getUniqueId());
-            if (!teleports.queueTeleport(senderPlayer, TeleportKind.TPA, receiver::getLocation)) {
+            if (!teleports.queueTeleport(senderPlayer, TeleportKind.TPA, receiver::getLocation, () -> {
+            }, senderPlayer, receiver)) {
                 return true;
             }
         } else {
@@ -432,7 +457,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             }
             requests.removeFor(receiver.getUniqueId());
             if (!teleports.queueTeleport(receiver, TeleportKind.TPAHERE, senderPlayer::getLocation, () -> {
-            }, senderPlayer)) {
+            }, senderPlayer, senderPlayer)) {
                 return true;
             }
         }
@@ -830,6 +855,33 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    private boolean handleTpaBack(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) {
+            send(sender, "player_only");
+            return true;
+        }
+        if (args.length != 0) {
+            send(player, "usage_tpaback");
+            return true;
+        }
+        if (!config.tpabackEnabled()) {
+            send(player, "feature_tpaback_disabled");
+            return true;
+        }
+        Location location = dataStore.deathLocation(player.getUniqueId());
+        if (location == null) {
+            send(player, "death_missing");
+            return true;
+        }
+        World blocked = firstTeleportBlocked(player.getWorld(), location.getWorld());
+        if (blocked != null) {
+            send(player, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
+            return true;
+        }
+        teleports.queueTeleport(player, TeleportKind.BACK, () -> location);
+        return true;
+    }
+
     private Double parseCoordinate(String value) {
         try {
             return Double.parseDouble(value);
@@ -1090,7 +1142,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                     return partial(List.of("EXACT", "RANDOM_OFFSET"), args[2]);
                 }
                 if (isCostModePath(path)) {
-                    return partial(List.of("NONE", "XP_LEVELS", "ITEM"), args[2]);
+                    return partial(List.of("NONE", "XP_LEVELS", "ITEM", "CURRENCY"), args[2]);
                 }
                 if (isMaterialPath(path)) {
                     return partial(Arrays.stream(Material.values()).map(Material::name).collect(Collectors.toList()),
@@ -1132,8 +1184,11 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             return Collections.emptyList();
         }
 
-        if (List.of("tpahere", "tpablock", "tpaunblock", "tpoffline").contains(cmd) && args.length == 1) {
+        if (List.of("tpahere", "tpablock", "tpaunblock").contains(cmd) && args.length == 1) {
             return partial(onlineNames(), args[0]);
+        }
+        if (cmd.equals("tpoffline") && args.length == 1) {
+            return partial(dataStore.offlineNames(), args[0]);
         }
         return Collections.emptyList();
     }
@@ -1169,6 +1224,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             case HOME -> config.homesEnabled();
             case RTP -> config.rtpEnabled();
             case SPAWN -> true;
+            case BACK -> config.tpabackEnabled();
         };
     }
 
@@ -1193,6 +1249,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                 path.startsWith("settings.rtp.realm_max_distance.") ||
                 path.startsWith("settings.costs.xp_levels.rtp.") ||
                 path.startsWith("settings.costs.item.rtp.") ||
+                path.startsWith("settings.costs.currency.rtp.") ||
                 path.equals("settings.rtp.blacklisted_worlds") ||
                 path.startsWith("settings.dimension_restrictions.disable_rtp.") ||
                 path.startsWith("settings.dimension_restrictions.disable_teleport.");
@@ -1217,6 +1274,8 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                 path.startsWith("settings.costs.xp_levels.rtp.") ||
                 path.startsWith("settings.costs.item.rtp.")) {
             current = Integer.valueOf(0);
+        } else if (path.startsWith("settings.costs.currency.rtp.")) {
+            current = Double.valueOf(0);
         } else if (path.equals("settings.rtp.blacklisted_worlds") && current == null) {
             current = Collections.emptyList();
         } else if (current == null && FEATURE_PATHS.contains(path)) {
@@ -1242,14 +1301,16 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             migrateGlobalRtpCostToRealm("settings.costs.item.rtp");
         } else if (path.startsWith("settings.costs.xp_levels.rtp.")) {
             migrateGlobalRtpCostToRealm("settings.costs.xp_levels.rtp");
+        } else if (path.startsWith("settings.costs.currency.rtp.")) {
+            migrateGlobalRtpCostToRealm("settings.costs.currency.rtp");
         }
     }
 
     private void migrateGlobalRtpCostToRealm(String basePath) {
-        if (!plugin.getConfig().isInt(basePath)) {
+        if (!plugin.getConfig().isInt(basePath) && !plugin.getConfig().isDouble(basePath)) {
             return;
         }
-        int global = plugin.getConfig().getInt(basePath);
+        double global = plugin.getConfig().getDouble(basePath);
         plugin.getConfig().set(basePath + ".overworld", global);
         plugin.getConfig().set(basePath + ".nether", global);
         plugin.getConfig().set(basePath + ".end", global);
@@ -1260,6 +1321,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                 path.startsWith("settings.rtp.realm_max_distance.") ||
                 path.startsWith("settings.costs.xp_levels.rtp.") ||
                 path.startsWith("settings.costs.item.rtp.") ||
+                path.startsWith("settings.costs.currency.rtp.") ||
                 path.equals("settings.rtp.blacklisted_worlds") ||
                 path.startsWith("settings.dimension_restrictions.disable_rtp.") ||
                 path.startsWith("settings.dimension_restrictions.disable_teleport.");
@@ -1274,6 +1336,8 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                 value = false;
             } else if (isIntegerPath(path)) {
                 value = 0;
+            } else if (isDoublePath(path)) {
+                value = 0d;
             } else if (path.equals("settings.rtp.blacklisted_worlds")) {
                 value = Collections.emptyList();
             } else {
@@ -1352,6 +1416,13 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                 return null;
             }
         }
+        if (isDoublePath(path)) {
+            try {
+                return Double.parseDouble(raw);
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
         if (isCostModePath(path)) {
             try {
                 return YatpaConfig.CostMode.valueOf(raw.toUpperCase(Locale.ROOT)).name();
@@ -1395,8 +1466,10 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             return "true/false";
         if (isIntegerPath(path))
             return "integer";
+        if (isDoublePath(path))
+            return "decimal number";
         if (isCostModePath(path))
-            return "NONE|XP_LEVELS|ITEM";
+            return "NONE|XP_LEVELS|ITEM|CURRENCY";
         if (isLandingModePath(path))
             return "EXACT|RANDOM_OFFSET";
         if (isMaterialPath(path))
@@ -1429,6 +1502,10 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                 || (path.contains(".costs.item.") && !path.equals("settings.costs.item.material"))
                 || path.contains(".realm_min_distance.")
                 || path.contains(".realm_max_distance.");
+    }
+
+    private boolean isDoublePath(String path) {
+        return path.contains(".costs.currency.");
     }
 
     private boolean isCostModePath(String path) {
@@ -1464,12 +1541,18 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
 
     private List<String> editableConfigPaths() {
         List<String> realmKeys = List.of(
+                "settings.costs.item.back",
                 "settings.costs.item.rtp.overworld",
                 "settings.costs.item.rtp.nether",
                 "settings.costs.item.rtp.end",
+                "settings.costs.xp_levels.back",
                 "settings.costs.xp_levels.rtp.overworld",
                 "settings.costs.xp_levels.rtp.nether",
                 "settings.costs.xp_levels.rtp.end",
+                "settings.costs.currency.back",
+                "settings.costs.currency.rtp.overworld",
+                "settings.costs.currency.rtp.nether",
+                "settings.costs.currency.rtp.end",
                 "settings.rtp.realm_min_distance.overworld",
                 "settings.rtp.realm_min_distance.nether",
                 "settings.rtp.realm_min_distance.end",

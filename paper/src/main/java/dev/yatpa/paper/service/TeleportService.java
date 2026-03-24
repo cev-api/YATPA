@@ -20,7 +20,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 public class TeleportService {
     private record PendingTeleport(BukkitTask task, Location origin, TeleportKind kind, UUID payerId,
-            String cancelKey) {
+            UUID notifyPlayerId) {
     }
 
     private final JavaPlugin plugin;
@@ -50,6 +50,16 @@ public class TeleportService {
         }
         p.task.cancel();
         tell(player, messageKey);
+        if (p.notifyPlayerId() != null) {
+            Player notify = plugin.getServer().getPlayer(p.notifyPlayerId());
+            if (notify != null && notify.isOnline()) {
+                String reason = messages.get(messageKey);
+                if (reason.equals(messageKey)) {
+                    reason = messageKey;
+                }
+                notify.sendMessage(messages.get("prefix") + player.getName() + "'s teleport was cancelled (" + reason + ")");
+            }
+        }
         play(player, "cancelled");
     }
 
@@ -60,13 +70,28 @@ public class TeleportService {
 
     public boolean queueTeleport(Player actor, TeleportKind kind, Supplier<Location> destinationSupplier,
             Runnable onSuccess) {
-        return queueTeleport(actor, kind, destinationSupplier, onSuccess, actor);
+        return queueTeleport(actor, kind, destinationSupplier, onSuccess, actor, null);
     }
 
     public boolean queueTeleport(Player actor, TeleportKind kind, Supplier<Location> destinationSupplier,
             Runnable onSuccess, Player payer) {
+        return queueTeleport(actor, kind, destinationSupplier, onSuccess, payer, null);
+    }
+
+    public boolean queueTeleport(Player actor, TeleportKind kind, Supplier<Location> destinationSupplier,
+            Runnable onSuccess, Player payer, Player notifyPlayer) {
         if (config.teleportDisabledIn(actor.getWorld())) {
             tell(actor, "teleport_disabled_dimension", Map.of("dimension", actor.getWorld().getName()));
+            return false;
+        }
+        CostService.ChargeResult preview = costs.preview(payer, kind);
+        if (!preview.success()) {
+            String template = messages.get("cost_failed");
+            if ("cost_failed".equals(template) || !template.contains("%required%")) {
+                payer.sendMessage(messages.get("prefix") + "§cYou require " + preview.required() + " to teleport.");
+            } else {
+                tell(payer, "cost_failed", Map.of("required", preview.required()));
+            }
             return false;
         }
         cancel(actor.getUniqueId(), "");
@@ -99,7 +124,9 @@ public class TeleportService {
             }
         }, 0L, 20L);
 
-        pending.put(actor.getUniqueId(), new PendingTeleport(task, origin, kind, payer.getUniqueId(), ""));
+        pending.put(actor.getUniqueId(),
+                new PendingTeleport(task, origin, kind, payer.getUniqueId(),
+                        notifyPlayer == null ? null : notifyPlayer.getUniqueId()));
         return true;
     }
 

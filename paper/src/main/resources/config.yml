@@ -50,13 +50,15 @@ settings:
     tpahere: true
     homes: true
     rtp: true
+    tpaback: true
   costs:
     enabled: false
-    mode: NONE # NONE, XP_LEVELS, ITEM
+    mode: NONE # NONE, XP_LEVELS, ITEM, CURRENCY
     xp_levels:
       tpa: 4
       tpahere: 4
       home: 16
+      back: 0
       rtp: 30
       rtp:
         overworld: 0
@@ -68,21 +70,32 @@ settings:
       tpa: 2
       tpahere: 2
       home: 20
+      back: 0
       rtp: 50
       rtp:
         overworld: 0
         nether: 0
         end: 0
       spawn: 10
-    spawn:
-      enabled: true # Enable a /spawn command that teleports players to a configurable spawn location.
-      first_join_only: true # Only teleport players to spawn on their first join.
-      x: 0
-      y: 100
-      z: 0
-      yaw: 0
-      pitch: 0
-      world: world
+    currency:
+      tpa: 0.0
+      tpahere: 0.0
+      home: 0.0
+      back: 0.0
+      rtp: 0.0
+      rtp:
+        overworld: 0.0
+        nether: 0.0
+        end: 0.0
+      spawn: 0.0
+  spawn:
+    enabled: true # Enable a /spawn command that teleports players to a configurable spawn location.
+    x: 0
+    y: 100
+    z: 0
+    yaw: 0
+    pitch: 0
+    world: world
 sounds:
   request_sent: ENTITY_EXPERIENCE_ORB_PICKUP
   request_received: BLOCK_NOTE_BLOCK_PLING

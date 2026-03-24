@@ -215,9 +215,20 @@ public class SettingsGui implements Listener {
         keys.add("settings.costs.xp_levels.rtp.overworld");
         keys.add("settings.costs.xp_levels.rtp.nether");
         keys.add("settings.costs.xp_levels.rtp.end");
+        keys.add("settings.costs.xp_levels.back");
         keys.add("settings.costs.item.rtp.overworld");
         keys.add("settings.costs.item.rtp.nether");
         keys.add("settings.costs.item.rtp.end");
+        keys.add("settings.costs.item.back");
+        keys.add("settings.costs.currency.rtp.overworld");
+        keys.add("settings.costs.currency.rtp.nether");
+        keys.add("settings.costs.currency.rtp.end");
+        keys.add("settings.costs.currency.tpa");
+        keys.add("settings.costs.currency.tpahere");
+        keys.add("settings.costs.currency.home");
+        keys.add("settings.costs.currency.back");
+        keys.add("settings.costs.currency.rtp");
+        keys.add("settings.costs.currency.spawn");
         keys.add("settings.dimension_restrictions.disable_rtp.overworld");
         keys.add("settings.dimension_restrictions.disable_rtp.nether");
         keys.add("settings.dimension_restrictions.disable_rtp.end");
@@ -249,8 +260,7 @@ public class SettingsGui implements Listener {
                 || path.equals("settings.cancel_on_move")
                 || path.equals("settings.cancel_on_damage")
                 || path.equals("settings.costs.enabled")
-                || path.equals("settings.spawn.enabled")
-                || path.equals("settings.spawn.first_join_only");
+                || path.equals("settings.spawn.enabled");
     }
 
     private boolean isIntegerPath(String path) {
@@ -262,6 +272,10 @@ public class SettingsGui implements Listener {
                 || (path.contains(".costs.item.") && !path.equals("settings.costs.item.material"))
                 || path.contains(".realm_min_distance.")
                 || path.contains(".realm_max_distance.");
+    }
+
+    private boolean isDoublePath(String path) {
+        return path.contains(".costs.currency.");
     }
 
     private boolean isCostModePath(String path) {
@@ -292,6 +306,8 @@ public class SettingsGui implements Listener {
             return ValueKind.STRING;
         if (isIntegerPath(path))
             return ValueKind.INTEGER;
+        if (isDoublePath(path))
+            return ValueKind.DOUBLE;
         if (current instanceof Long)
             return ValueKind.LONG;
         if (current instanceof Double)
@@ -443,7 +459,7 @@ public class SettingsGui implements Listener {
 
     private List<String> optionsForPath(String path) {
         if (isCostModePath(path)) {
-            return List.of("NONE", "XP_LEVELS", "ITEM");
+            return List.of("NONE", "XP_LEVELS", "ITEM", "CURRENCY");
         }
         if (isLandingModePath(path)) {
             return List.of("EXACT", "RANDOM_OFFSET");
@@ -523,7 +539,7 @@ public class SettingsGui implements Listener {
     private Object parsePathAwareValue(String path, ValueKind kind, String value) {
         String raw = value.trim();
         if (isCostModePath(path)) {
-            if (!List.of("NONE", "XP_LEVELS", "ITEM").contains(raw.toUpperCase(java.util.Locale.ROOT)))
+            if (!List.of("NONE", "XP_LEVELS", "ITEM", "CURRENCY").contains(raw.toUpperCase(java.util.Locale.ROOT)))
                 return null;
             return raw.toUpperCase(java.util.Locale.ROOT);
         }
@@ -595,14 +611,16 @@ public class SettingsGui implements Listener {
             migrateGlobalRtpCostToRealm("settings.costs.item.rtp");
         } else if (path.startsWith("settings.costs.xp_levels.rtp.")) {
             migrateGlobalRtpCostToRealm("settings.costs.xp_levels.rtp");
+        } else if (path.startsWith("settings.costs.currency.rtp.")) {
+            migrateGlobalRtpCostToRealm("settings.costs.currency.rtp");
         }
     }
 
     private void migrateGlobalRtpCostToRealm(String basePath) {
-        if (!plugin.getConfig().isInt(basePath)) {
+        if (!plugin.getConfig().isInt(basePath) && !plugin.getConfig().isDouble(basePath)) {
             return;
         }
-        int global = plugin.getConfig().getInt(basePath);
+        double global = plugin.getConfig().getDouble(basePath);
         plugin.getConfig().set(basePath + ".overworld", global);
         plugin.getConfig().set(basePath + ".nether", global);
         plugin.getConfig().set(basePath + ".end", global);
