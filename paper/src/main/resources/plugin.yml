@@ -1,5 +1,5 @@
 name: YATPA
-version: 1.0.5
+version: 1.0.6
 main: dev.yatpa.paper.YatpaPaperPlugin
 api-version: '1.21'
 authors: [CevAPI]
@@ -39,6 +39,9 @@ commands:
     permission: yatpa.op.tpoffline
   tpaback:
     usage: /tpaback
+  tpalog:
+    usage: /tpalog [count]
+    permission: yatpa.op.tpalog
   setspawn:
     usage: /setspawn
     permission: yatpa.op.setspawn
@@ -48,6 +51,8 @@ permissions:
   yatpa.op.tpoffline:
     default: op
   yatpa.op.reload:
+    default: op
+  yatpa.op.tpalog:
     default: op
   yatpa.op.setspawn:
     default: op

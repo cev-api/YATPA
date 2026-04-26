@@ -27,13 +27,15 @@ public class TeleportService {
     private final YatpaConfig config;
     private final XmlMessages messages;
     private final CostService costs;
+    private final TeleportLogService teleportLog;
     private final Map<UUID, PendingTeleport> pending = new ConcurrentHashMap<>();
 
-    public TeleportService(JavaPlugin plugin, YatpaConfig config, XmlMessages messages, CostService costs) {
+    public TeleportService(JavaPlugin plugin, YatpaConfig config, XmlMessages messages, CostService costs, TeleportLogService teleportLog) {
         this.plugin = plugin;
         this.config = config;
         this.messages = messages;
         this.costs = costs;
+        this.teleportLog = teleportLog;
     }
 
     public void cancel(UUID uuid, String messageKey) {
@@ -168,7 +170,10 @@ public class TeleportService {
             return;
         }
         Location adjusted = adjustLanding(destination);
+        Location from = actor.getLocation().clone();
         if (actor.teleport(adjusted)) {
+            String payerName = payer.getUniqueId().equals(actor.getUniqueId()) ? "" : payer.getName();
+            teleportLog.record(kind.name(), actor.getName(), payerName, from, adjusted);
             onSuccess.run();
             tell(actor, "teleport_success");
             play(actor, "success");
@@ -272,14 +277,23 @@ public class TeleportService {
     }
 
     public void teleportToSpawn(Player player) {
+        World world = plugin.getServer().getWorld(config.spawnWorld());
+        if (world == null) {
+            world = player.getWorld();
+            plugin.getLogger().warning("Configured spawn world not found: " + config.spawnWorld()
+                    + ". Falling back to player's current world.");
+        }
         Location spawn = new Location(
-                plugin.getServer().getWorld(config.spawnWorld()),
+                world,
                 config.spawnX(),
                 config.spawnY(),
                 config.spawnZ(),
                 config.spawnYaw().floatValue(),
                 config.spawnPitch().floatValue());
-        player.teleport(spawn);
+        Location from = player.getLocation().clone();
+        if (player.teleport(spawn)) {
+            teleportLog.record("SPAWN", player.getName(), "", from, spawn);
+        }
 
     }
 }

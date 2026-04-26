@@ -8,6 +8,7 @@ import dev.yatpa.paper.listener.PlayerEventListener;
 import dev.yatpa.paper.service.CostService;
 import dev.yatpa.paper.service.DataStore;
 import dev.yatpa.paper.service.RequestService;
+import dev.yatpa.paper.service.TeleportLogService;
 import dev.yatpa.paper.service.TeleportService;
 import java.io.File;
 import java.util.Map;
@@ -26,6 +27,7 @@ public class YatpaPaperPlugin extends JavaPlugin {
     private DataStore dataStore;
     private RequestService requests;
     private TeleportService teleports;
+    private TeleportLogService teleportLog;
     private Economy economy;
 
     @Override
@@ -51,13 +53,17 @@ public class YatpaPaperPlugin extends JavaPlugin {
         this.economy = setupEconomy();
         this.dataStore = new DataStore(getDataFolder());
         this.requests = new RequestService(configModel.requestTimeoutSeconds(), configModel.requestCooldownSeconds());
-        this.teleports = new TeleportService(this, configModel, messages, new CostService(configModel, economy));
+        if (this.teleportLog == null) {
+            this.teleportLog = new TeleportLogService(200);
+        }
+        this.teleports = new TeleportService(this, configModel, messages, new CostService(configModel, economy), teleportLog);
 
         SettingsGui settingsGui = new SettingsGui(this, messages);
         YatpaCommandHandler handler = new YatpaCommandHandler(this, messages, configModel, dataStore, requests,
-                teleports, settingsGui);
+                teleports, settingsGui, teleportLog);
         for (String command : new String[] { "tpa", "yatpa", "tpahelp", "tphelp", "tpahere", "tpaccept", "tpdeny",
                 "tpatoggle", "tpablock", "tpaunblock", "tphome", "rtp", "spawn", "ytp", "tpoffline", "tpaback",
+                "tpalog",
                 "setspawn" }) {
             PluginCommand pluginCommand = getCommand(command);
             if (pluginCommand != null) {
@@ -210,6 +216,10 @@ public class YatpaPaperPlugin extends JavaPlugin {
 
     public TeleportService teleports() {
         return teleports;
+    }
+
+    public TeleportLogService teleportLog() {
+        return teleportLog;
     }
 
     private Economy setupEconomy() {

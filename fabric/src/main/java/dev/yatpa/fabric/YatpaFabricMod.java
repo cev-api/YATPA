@@ -6,6 +6,7 @@ import com.google.gson.reflect.TypeToken;
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
@@ -19,6 +20,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -31,6 +34,9 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import javax.xml.parsers.DocumentBuilderFactory;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -73,6 +79,8 @@ import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
 public class YatpaFabricMod implements DedicatedServerModInitializer {
+    private static final DateTimeFormatter TPALOG_TIME = DateTimeFormatter.ofPattern("HH:mm:ss")
+        .withZone(ZoneId.systemDefault());
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Type STORE_TYPE = new TypeToken<Store>() {}.getType();
     private static final List<String> FEATURE_PATHS = List.of(
@@ -89,6 +97,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
     private final Map<UUID, Long> cooldownBySender = new HashMap<>();
     private final Map<UUID, PendingTeleport> pendingTeleports = new HashMap<>();
     private final Map<UUID, Long> rtpCooldownByPlayer = new HashMap<>();
+    private final Deque<TeleportLogEntry> teleportLogEntries = new ArrayDeque<>();
 
     private Store store = new Store();
     private Config config = new Config();
@@ -155,6 +164,10 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                     .suggests(this::suggestOfflineNames)
                     .executes(this::tpOffline)));
             d.register(Commands.literal("tpaback").executes(this::tpaback));
+            d.register(Commands.literal("tpalog")
+                .requires(src -> src.hasPermission(2))
+                .executes(this::tpalog)
+                .then(Commands.argument("count", IntegerArgumentType.integer(1, 50)).executes(this::tpalogWithCount)));
             d.register(Commands.literal("rtp").executes(this::rtp));
             d.register(Commands.literal("spawn").executes(this::spawn));
             d.register(Commands.literal("setspawn").requires(src -> src.hasPermission(2)).executes(this::setSpawn));
@@ -237,7 +250,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
                 if (charge.paid != null && !charge.paid.isBlank()) {
                     sendRaw(payer, "Paid " + charge.paid + ".");
                 }
-                if (teleport(player, pending.targetSupplier.get())) {
+                if (teleport(player, pending.targetSupplier.get(), pending.kind.name())) {
                     pending.onSuccess.run();
                     send(player, "teleport_success");
                     play(player, "success");
@@ -316,6 +329,9 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         sendRaw(ctx.getSource(), "/spawn - Teleport near spawn");
         if (config.tpabackEnabled) {
             sendRaw(ctx.getSource(), "/tpaback - Teleport to your last death location");
+        }
+        if (ctx.getSource().hasPermission(2)) {
+            sendRaw(ctx.getSource(), "/tpalog [count] - Show recent teleport history");
         }
         appendCostsHelp(ctx.getSource());
         sendRaw(ctx.getSource(), "-----------------------");
@@ -918,7 +934,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             return 0;
         }
         TeleportTarget destination = resolveYtpTarget(source, target.serverLevel(), target.getX(), target.getY(), target.getZ(), source.getYRot(), source.getXRot());
-        if (teleport(source, destination)) {
+        if (teleport(source, destination, "YTP")) {
             send(source, "teleport_success");
         }
         return Command.SINGLE_SUCCESS;
@@ -955,7 +971,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             return 0;
         }
         TeleportTarget destination = resolveYtpTarget(actor, target.serverLevel(), target.getX(), target.getY(), target.getZ(), actor.getYRot(), actor.getXRot());
-        if (teleport(actor, destination)) {
+        if (teleport(actor, destination, "YTP")) {
             send(source, "teleport_success");
             if (!source.getUUID().equals(actor.getUUID())) {
                 send(actor, "teleport_success");
@@ -1052,7 +1068,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
 
     private int teleportToCoordinates(ServerPlayer player, double x, double y, double z, ServerLevel level) {
         TeleportTarget destination = resolveYtpTarget(player, level, x, y, z, player.getYRot(), player.getXRot());
-        if (teleport(player, destination)) {
+        if (teleport(player, destination, "YTP")) {
             send(player, "teleport_success");
         }
         return Command.SINGLE_SUCCESS;
@@ -1060,7 +1076,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
 
     private int teleportPlayerToCoordinates(ServerPlayer source, ServerPlayer actor, double x, double y, double z, ServerLevel level) {
         TeleportTarget destination = resolveYtpTarget(actor, level, x, y, z, actor.getYRot(), actor.getXRot());
-        if (teleport(actor, destination)) {
+        if (teleport(actor, destination, "YTP")) {
             send(source, "teleport_success");
             if (!source.getUUID().equals(actor.getUUID())) {
                 send(actor, "teleport_success");
@@ -1131,11 +1147,8 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             return 0;
         }
         MinecraftServer minecraftServer = Objects.requireNonNull(player.getServer());
-        ServerLevel level = minecraftServer.getLevel(ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(pos.dimension)));
-        if (level == null) {
-            level = minecraftServer.overworld();
-        }
-        if (teleport(player, level, pos.x, pos.y, pos.z, pos.yaw, pos.pitch)) {
+        ServerLevel level = resolveStoredLevel(minecraftServer, pos.dimension, minecraftServer.overworld());
+        if (teleport(player, level, pos.x, pos.y, pos.z, pos.yaw, pos.pitch, "TPOFFLINE")) {
             send(player, "teleport_success");
         }
         return Command.SINGLE_SUCCESS;
@@ -1160,10 +1173,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             return 0;
         }
         MinecraftServer minecraftServer = Objects.requireNonNull(player.getServer());
-        ServerLevel level = minecraftServer.getLevel(ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(pos.dimension)));
-        if (level == null) {
-            level = minecraftServer.overworld();
-        }
+        ServerLevel level = resolveStoredLevel(minecraftServer, pos.dimension, minecraftServer.overworld());
         final ServerLevel finalLevel = level;
         queueDelayedTeleport(player, TeleportKind.BACK, () -> finalLevel, () -> pos.x, () -> pos.y, () -> pos.z, pos.yaw, pos.pitch);
         return Command.SINGLE_SUCCESS;
@@ -1426,10 +1436,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             return 0;
         }
         MinecraftServer minecraftServer = Objects.requireNonNull(player.getServer());
-        ServerLevel level = minecraftServer.getLevel(ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(home.dimension)));
-        if (level == null) {
-            level = player.serverLevel();
-        }
+        ServerLevel level = resolveStoredLevel(minecraftServer, home.dimension, player.serverLevel());
         ServerLevel blocked = firstBlockedTeleportLevel(player.serverLevel(), level);
         if (blocked != null) {
             send(player, "teleport_disabled_dimension", Map.of("dimension", blocked.dimension().location().toString()));
@@ -1489,7 +1496,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             if (charge.paid != null && !charge.paid.isBlank()) {
                 sendRaw(payer, "Paid " + charge.paid + ".");
             }
-            if (teleport(player, supplier.get())) {
+            if (teleport(player, supplier.get(), kind.name())) {
                 onSuccess.run();
                 send(player, "teleport_success");
                 play(player, "success");
@@ -1621,6 +1628,10 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
     }
 
     private boolean teleport(ServerPlayer player, TeleportTarget target) {
+        return teleport(player, target, "TELEPORT");
+    }
+
+    private boolean teleport(ServerPlayer player, TeleportTarget target, String action) {
         if (config.teleportDisabledIn(player.serverLevel())) {
             send(player, "teleport_disabled_dimension", Map.of("dimension", player.serverLevel().dimension().location().toString()));
             return false;
@@ -1630,7 +1641,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             return false;
         }
         TeleportTarget adjusted = adjustLanding(target);
-        return teleport(player, adjusted.level, adjusted.x, adjusted.y, adjusted.z, adjusted.yaw, adjusted.pitch);
+        return teleport(player, adjusted.level, adjusted.x, adjusted.y, adjusted.z, adjusted.yaw, adjusted.pitch, action);
     }
 
     private TeleportTarget resolveYtpTarget(ServerPlayer player, ServerLevel level, double x, double y, double z, float yaw, float pitch) {
@@ -1804,6 +1815,10 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
     }
 
     private boolean teleport(ServerPlayer player, ServerLevel level, double x, double y, double z, float yaw, float pitch) {
+        return teleport(player, level, x, y, z, yaw, pitch, "TELEPORT");
+    }
+
+    private boolean teleport(ServerPlayer player, ServerLevel level, double x, double y, double z, float yaw, float pitch, String action) {
         if (config.teleportDisabledIn(player.serverLevel())) {
             send(player, "teleport_disabled_dimension", Map.of("dimension", player.serverLevel().dimension().location().toString()));
             return false;
@@ -1812,7 +1827,12 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             send(player, "teleport_disabled_dimension", Map.of("dimension", level.dimension().location().toString()));
             return false;
         }
+        ServerLevel fromLevel = player.serverLevel();
+        double fromX = player.getX();
+        double fromY = player.getY();
+        double fromZ = player.getZ();
         player.teleportTo(level, x, y, z, yaw, pitch);
+        recordTeleportLog(action, player.getGameProfile().getName(), "", fromLevel, fromX, fromY, fromZ, level, x, y, z);
         return true;
     }
 
@@ -1991,6 +2011,78 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         return value;
     }
 
+    private void recordTeleportLog(
+        String action,
+        String actor,
+        String payer,
+        ServerLevel fromLevel,
+        double fromX,
+        double fromY,
+        double fromZ,
+        ServerLevel toLevel,
+        double toX,
+        double toY,
+        double toZ
+    ) {
+        if (fromLevel == null || toLevel == null) {
+            return;
+        }
+        teleportLogEntries.addFirst(new TeleportLogEntry(
+            Instant.now().toEpochMilli(),
+            action,
+            actor,
+            payer,
+            fromLevel.dimension().location().toString(),
+            fromX,
+            fromY,
+            fromZ,
+            toLevel.dimension().location().toString(),
+            toX,
+            toY,
+            toZ
+        ));
+        while (teleportLogEntries.size() > 200) {
+            teleportLogEntries.removeLast();
+        }
+    }
+
+    private int tpalog(CommandContext<CommandSourceStack> ctx) {
+        return tpalog(ctx, 10);
+    }
+
+    private int tpalogWithCount(CommandContext<CommandSourceStack> ctx) {
+        return tpalog(ctx, IntegerArgumentType.getInteger(ctx, "count"));
+    }
+
+    private int tpalog(CommandContext<CommandSourceStack> ctx, int count) {
+        int limit = Math.max(1, Math.min(50, count));
+        if (teleportLogEntries.isEmpty()) {
+            sendRaw(ctx.getSource(), "No teleport log entries yet.");
+            return Command.SINGLE_SUCCESS;
+        }
+        sendRaw(ctx.getSource(), "Recent teleports (latest " + Math.min(limit, teleportLogEntries.size()) + "):");
+        int shown = 0;
+        for (TeleportLogEntry entry : teleportLogEntries) {
+            if (shown++ >= limit) {
+                break;
+            }
+            String payer = entry.payer == null || entry.payer.isBlank() ? "" : " payer=" + entry.payer;
+            sendRaw(ctx.getSource(),
+                "[" + TPALOG_TIME.format(Instant.ofEpochMilli(entry.timestampMillis)) + "] "
+                    + entry.action + " " + entry.actor + " "
+                    + shortLocation(entry.fromWorld, entry.fromX, entry.fromY, entry.fromZ)
+                    + " -> "
+                    + shortLocation(entry.toWorld, entry.toX, entry.toY, entry.toZ)
+                    + payer
+            );
+        }
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private String shortLocation(String world, double x, double y, double z) {
+        return world + "(" + (int) Math.floor(x) + "," + (int) Math.floor(y) + "," + (int) Math.floor(z) + ")";
+    }
+
     private void loadFiles() {
         try {
             Files.createDirectories(configDir);
@@ -2079,6 +2171,22 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         }
     }
 
+    private ServerLevel resolveStoredLevel(MinecraftServer minecraftServer, String storedDimension, ServerLevel fallback) {
+        if (storedDimension == null || storedDimension.isBlank()) {
+            return fallback;
+        }
+        try {
+            ServerLevel direct = minecraftServer
+                .getLevel(ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(storedDimension)));
+            if (direct != null) {
+                return direct;
+            }
+        } catch (RuntimeException ignored) {
+        }
+        ServerLevel byAlias = resolveRealmById(minecraftServer, storedDimension.toLowerCase(Locale.ROOT));
+        return byAlias != null ? byAlias : fallback;
+    }
+
     private static Map<String, String> defaultConfigValues() {
         Map<String, String> defaults = new LinkedHashMap<>();
         defaults.put("settings.max_homes_default", "3");
@@ -2163,6 +2271,21 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
     }
 
     private record ExpiredRequest(UUID receiver, Request request) {}
+
+    private record TeleportLogEntry(
+        long timestampMillis,
+        String action,
+        String actor,
+        String payer,
+        String fromWorld,
+        double fromX,
+        double fromY,
+        double fromZ,
+        String toWorld,
+        double toX,
+        double toY,
+        double toZ
+    ) {}
 
     private static class Request {
         private final UUID sender;

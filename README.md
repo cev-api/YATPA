@@ -1,5 +1,5 @@
 # YATPA
-Current version: `1.0.5`
+Current version: `1.0.6`
 
 Yet Another TPA.
 
@@ -35,6 +35,7 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
   - `/ytp <player> <x> <y> <z> [realm]`
   - `/ytp <x> <y> <z> [realm]` 
   - `/tpoffline <player>`
+  - `/tpalog [count]`
 - In-game admin config (OP):
   - `/yatpa settings`
   - `/yatpa gui` (Paper, paginated inventory editor for all settings; click to toggle/edit)
@@ -226,6 +227,7 @@ Fabric `config.properties` supports the same restrictions with either:
 - `yatpa.op.reload` (default: op)
 - `yatpa.op.tp` (default: op)
 - `yatpa.op.tpoffline` (default: op)
+- `yatpa.op.tpalog` (default: op)
 - `yatpa.op.setspawn` (default: op)
 
 ## License

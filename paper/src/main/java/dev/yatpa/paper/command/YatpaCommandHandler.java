@@ -10,7 +10,10 @@ import dev.yatpa.paper.data.TeleportRequest;
 import dev.yatpa.paper.gui.SettingsGui;
 import dev.yatpa.paper.service.DataStore;
 import dev.yatpa.paper.service.RequestService;
+import dev.yatpa.paper.service.TeleportLogService;
 import dev.yatpa.paper.service.TeleportService;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -42,6 +45,8 @@ import org.bukkit.entity.Player;
 import org.checkerframework.checker.units.qual.t;
 
 public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
+    private static final DateTimeFormatter TPALOG_TIME = DateTimeFormatter.ofPattern("HH:mm:ss")
+            .withZone(ZoneId.systemDefault());
     private static final List<String> FEATURE_PATHS = List.of(
             "settings.features.enabled",
             "settings.features.tpa",
@@ -57,6 +62,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
     private final RequestService requests;
     private final TeleportService teleports;
     private final SettingsGui settingsGui;
+    private final TeleportLogService teleportLog;
     private final Map<UUID, Long> rtpCooldowns = new ConcurrentHashMap<>();
 
     public YatpaCommandHandler(
@@ -66,7 +72,8 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             DataStore dataStore,
             RequestService requests,
             TeleportService teleports,
-            SettingsGui settingsGui) {
+            SettingsGui settingsGui,
+            TeleportLogService teleportLog) {
         this.plugin = plugin;
         this.messages = messages;
         this.config = config;
@@ -74,6 +81,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         this.requests = requests;
         this.teleports = teleports;
         this.settingsGui = settingsGui;
+        this.teleportLog = teleportLog;
     }
 
     @Override
@@ -99,6 +107,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             case "ytp" -> handleYtp(sender, args);
             case "tpoffline" -> handleTpOffline(sender, args);
             case "tpaback" -> handleTpaBack(sender, args);
+            case "tpalog" -> handleTpaLog(sender, args);
             case "setspawn" -> handleSetSpawn(sender);
             default -> false;
         };
@@ -188,6 +197,9 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         sender.sendMessage("§a/spawn §7- Teleport near spawn");
         if (config.tpabackEnabled()) {
             sender.sendMessage("§a/tpaback §7- Teleport to your last death location");
+        }
+        if (sender.hasPermission("yatpa.op.tpalog")) {
+            sender.sendMessage("§a/tpalog [count] §7- Show recent teleport history");
         }
         if (sender.hasPermission("yatpa.op.reload")) {
             sender.sendMessage("§a/yatpa gui §7- Open admin settings GUI");
@@ -704,6 +716,11 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                 config.spawnZ(),
                 config.spawnYaw().floatValue(),
                 config.spawnPitch().floatValue());
+        if (spawn.getWorld() == null) {
+            sender.sendMessage(messages.get("prefix") + "§cConfigured spawn world not found: §e" + config.spawnWorld());
+            plugin.getLogger().warning("Configured spawn world not found for /spawn: " + config.spawnWorld());
+            return true;
+        }
         teleports.queueTeleport(player, TeleportKind.SPAWN, () -> spawn);
         return true;
     }
@@ -732,8 +749,12 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                 send(player, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
                 return true;
             }
-            player.teleport(resolveYtpDestination(player, target.getLocation()));
-            send(player, "teleport_success");
+            Location destination = resolveYtpDestination(player, target.getLocation());
+            Location from = player.getLocation().clone();
+            if (player.teleport(destination)) {
+                teleportLog.record("YTP", player.getName(), "", from, destination);
+                send(player, "teleport_success");
+            }
             return true;
         }
         if (args.length == 2) {
@@ -751,10 +772,14 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                 }
                 return true;
             }
-            actor.teleport(resolveYtpDestination(actor, target.getLocation()));
-            send(player, "teleport_success");
-            if (!actor.getUniqueId().equals(player.getUniqueId())) {
-                send(actor, "teleport_success");
+            Location destination = resolveYtpDestination(actor, target.getLocation());
+            Location from = actor.getLocation().clone();
+            if (actor.teleport(destination)) {
+                teleportLog.record("YTP", actor.getName(), player.getName(), from, destination);
+                send(player, "teleport_success");
+                if (!actor.getUniqueId().equals(player.getUniqueId())) {
+                    send(actor, "teleport_success");
+                }
             }
             return true;
         }
@@ -780,8 +805,12 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
 
             Location destination = new Location(world, x, y, z, player.getLocation().getYaw(),
                     player.getLocation().getPitch());
-            player.teleport(resolveYtpDestination(player, destination));
-            send(player, "teleport_success");
+            Location adjusted = resolveYtpDestination(player, destination);
+            Location from = player.getLocation().clone();
+            if (player.teleport(adjusted)) {
+                teleportLog.record("YTP", player.getName(), "", from, adjusted);
+                send(player, "teleport_success");
+            }
             return true;
         }
         if (args.length == 4 || args.length == 5) {
@@ -815,10 +844,14 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
 
             Location actorLocation = actor.getLocation();
             Location destination = new Location(world, x, y, z, actorLocation.getYaw(), actorLocation.getPitch());
-            actor.teleport(resolveYtpDestination(actor, destination));
-            send(player, "teleport_success");
-            if (!actor.getUniqueId().equals(player.getUniqueId())) {
-                send(actor, "teleport_success");
+            Location adjusted = resolveYtpDestination(actor, destination);
+            Location from = actor.getLocation().clone();
+            if (actor.teleport(adjusted)) {
+                teleportLog.record("YTP", actor.getName(), player.getName(), from, adjusted);
+                send(player, "teleport_success");
+                if (!actor.getUniqueId().equals(player.getUniqueId())) {
+                    send(actor, "teleport_success");
+                }
             }
             return true;
         }
@@ -850,9 +883,54 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             send(player, "teleport_disabled_dimension", Map.of("dimension", blocked.getName()));
             return true;
         }
-        player.teleport(location);
-        send(player, "teleport_success");
+        Location from = player.getLocation().clone();
+        if (player.teleport(location)) {
+            teleportLog.record("TPOFFLINE", player.getName(), "", from, location);
+            send(player, "teleport_success");
+        }
         return true;
+    }
+
+    private boolean handleTpaLog(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("yatpa.op.tpalog")) {
+            send(sender, "no_permission");
+            return true;
+        }
+        int limit = 10;
+        if (args.length > 1) {
+            sender.sendMessage(messages.get("prefix") + "§eUsage: /tpalog [count]");
+            return true;
+        }
+        if (args.length == 1) {
+            try {
+                limit = Integer.parseInt(args[0]);
+            } catch (NumberFormatException ignored) {
+                sender.sendMessage(messages.get("prefix") + "§eUsage: /tpalog [count]");
+                return true;
+            }
+        }
+        limit = Math.max(1, Math.min(50, limit));
+        List<TeleportLogService.Entry> recent = teleportLog.recent(limit);
+        if (recent.isEmpty()) {
+            sender.sendMessage(messages.get("prefix") + "§7No teleport log entries yet.");
+            return true;
+        }
+        sender.sendMessage(messages.get("prefix") + "§eRecent teleports (latest " + recent.size() + "):");
+        for (TeleportLogService.Entry entry : recent) {
+            String payer = (entry.payer() == null || entry.payer().isBlank()) ? "" : " §7payer=§f" + entry.payer();
+            sender.sendMessage(
+                    "§7[" + TPALOG_TIME.format(entry.timestamp()) + "] "
+                            + "§a" + entry.action()
+                            + " §f" + entry.actor()
+                            + " §7" + shortLocation(entry.fromWorld(), entry.fromX(), entry.fromY(), entry.fromZ())
+                            + " §8-> §7" + shortLocation(entry.toWorld(), entry.toX(), entry.toY(), entry.toZ())
+                            + payer);
+        }
+        return true;
+    }
+
+    private String shortLocation(String world, double x, double y, double z) {
+        return world + "(" + (int) Math.floor(x) + "," + (int) Math.floor(y) + "," + (int) Math.floor(z) + ")";
     }
 
     private boolean handleTpaBack(CommandSender sender, String[] args) {
@@ -1206,6 +1284,9 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         }
         if (cmd.equals("tpoffline") && args.length == 1) {
             return partial(dataStore.offlineNames(), args[0]);
+        }
+        if (cmd.equals("tpalog") && args.length == 1) {
+            return partial(List.of("5", "10", "20", "50"), args[0]);
         }
         return Collections.emptyList();
     }
