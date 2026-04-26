@@ -1653,7 +1653,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         int originY = (int) Math.floor(desired.y);
         int originZ = (int) Math.floor(desired.z);
         int minY = level.getMinBuildHeight() + 1;
-        int maxY = level.getMaxBuildHeight() - 2;
+        int maxY = maxSafeStandY(level);
         int startY = clamp(originY, minY, maxY);
         double bestDistanceSq = Double.MAX_VALUE;
         TeleportTarget best = null;
@@ -1686,7 +1686,8 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             BlockPos spawn = level.getSharedSpawnPos();
             best = findSafeInColumn(level, spawn.getX(), spawn.getZ(), spawn.getY(), verticalRange, desired.yaw, desired.pitch);
             if (best == null) {
-                best = new TeleportTarget(level, spawn.getX() + 0.5, spawn.getY() + 1, spawn.getZ() + 0.5, desired.yaw, desired.pitch);
+                int fallbackY = clamp(spawn.getY() + 1, minY, maxY);
+                best = new TeleportTarget(level, spawn.getX() + 0.5, fallbackY, spawn.getZ() + 0.5, desired.yaw, desired.pitch);
             }
         }
         return best;
@@ -1697,7 +1698,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             return null;
         }
         int minY = level.getMinBuildHeight() + 1;
-        int maxY = level.getMaxBuildHeight() - 2;
+        int maxY = maxSafeStandY(level);
         int startY = clamp(targetY, minY, maxY);
 
         for (int dy = 0; dy <= verticalRange; dy++) {
@@ -1722,7 +1723,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
 
     private boolean isSafeStandLocation(ServerLevel level, int x, int y, int z) {
         int minY = level.getMinBuildHeight() + 1;
-        int maxY = level.getMaxBuildHeight() - 2;
+        int maxY = maxSafeStandY(level);
         if (y < minY || y > maxY) {
             return false;
         }
@@ -1750,6 +1751,24 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         return dx * dx + dy * dy + dz * dz;
     }
 
+    private int maxSafeStandY(ServerLevel level) {
+        int maxY = level.getMaxBuildHeight() - 2;
+        if (level.dimensionType().hasCeiling()) {
+            int logicalHeight = level.dimensionType().logicalHeight();
+            if (logicalHeight > level.getMinBuildHeight()) {
+                // Prevent teleports onto the top side of ceiling dimensions (e.g. nether roof).
+                maxY = Math.min(maxY, logicalHeight - 1);
+            }
+        }
+        return maxY;
+    }
+
+    private boolean isWithinTeleportYRange(ServerLevel level, int y) {
+        int minY = level.getMinBuildHeight() + 1;
+        int maxY = maxSafeStandY(level);
+        return y >= minY && y <= maxY;
+    }
+
     private int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
@@ -1775,7 +1794,11 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             int x = (int) Math.floor(target.x + dx);
             int z = (int) Math.floor(target.z + dz);
             BlockPos top = target.level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, new BlockPos(x, 0, z));
-            return new TeleportTarget(target.level, top.getX() + 0.5, top.getY() + 1, top.getZ() + 0.5, target.yaw, target.pitch);
+            int y = top.getY() + 1;
+            if (!isSafeStandLocation(target.level, top.getX(), y, top.getZ())) {
+                continue;
+            }
+            return new TeleportTarget(target.level, top.getX() + 0.5, y, top.getZ() + 0.5, target.yaw, target.pitch);
         }
         return target;
     }
@@ -1808,7 +1831,7 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
             }
             BlockPos top = level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, new BlockPos(x, 0, z));
             int y = top.getY() + 1;
-            if (bypassSafeYtp(player) || isSafeStandLocation(level, x, y, z)) {
+            if ((bypassSafeYtp(player) && isWithinTeleportYRange(level, y)) || isSafeStandLocation(level, x, y, z)) {
                 return new Position(top.getX() + 0.5, y, top.getZ() + 0.5, playerDim(level), player.getYRot(), player.getXRot());
             }
 
@@ -1824,7 +1847,8 @@ public class YatpaFabricMod implements DedicatedServerModInitializer {
         if (fallback != null) {
             return new Position(fallback.x, fallback.y, fallback.z, playerDim(level), fallback.yaw, fallback.pitch);
         }
-        return new Position(spawn.getX() + 0.5, spawn.getY() + 1, spawn.getZ() + 0.5, playerDim(level), player.getYRot(), player.getXRot());
+        int fallbackY = clamp(spawn.getY() + 1, level.getMinBuildHeight() + 1, maxSafeStandY(level));
+        return new Position(spawn.getX() + 0.5, fallbackY, spawn.getZ() + 0.5, playerDim(level), player.getYRot(), player.getXRot());
     }
 
     private String playerDim(ServerLevel level) {

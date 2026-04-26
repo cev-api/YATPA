@@ -915,7 +915,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         int originY = desired.getBlockY();
         int originZ = desired.getBlockZ();
         int minY = world.getMinHeight() + 1;
-        int maxY = world.getMaxHeight() - 2;
+        int maxY = maxSafeStandY(world);
         int startY = clamp(originY, minY, maxY);
         double bestDistanceSq = Double.MAX_VALUE;
         Location best = null;
@@ -959,7 +959,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
 
     private Location findSafeInColumn(World world, int x, int z, int targetY, int verticalRange) {
         int minY = world.getMinHeight() + 1;
-        int maxY = world.getMaxHeight() - 2;
+        int maxY = maxSafeStandY(world);
         int startY = clamp(targetY, minY, maxY);
         Location borderCheck = new Location(world, x, startY, z);
         if (!world.getWorldBorder().isInside(borderCheck)) {
@@ -996,7 +996,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
 
     private boolean isSafeStandLocation(World world, int x, int y, int z) {
         int minY = world.getMinHeight() + 1;
-        int maxY = world.getMaxHeight() - 2;
+        int maxY = maxSafeStandY(world);
         if (y < minY || y > maxY) {
             return false;
         }
@@ -1013,6 +1013,15 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
 
     private Location centeredLocation(World world, int x, int y, int z) {
         return new Location(world, x + 0.5, y, z + 0.5);
+    }
+
+    private int maxSafeStandY(World world) {
+        int maxY = world.getMaxHeight() - 2;
+        if (world.getEnvironment() == World.Environment.NETHER) {
+            // Keep RTP/nearest-safe logic below the nether roof.
+            maxY = Math.min(maxY, 127);
+        }
+        return maxY;
     }
 
     private int clamp(int value, int min, int max) {
@@ -1064,6 +1073,8 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         int min = Math.max(0, minRadius);
         int max = Math.max(min + 1, maxRadius);
         var border = world.getWorldBorder();
+        int minY = world.getMinHeight() + 1;
+        int maxY = maxSafeStandY(world);
 
         for (int i = 0; i < 80; i++) {
             double angle = ThreadLocalRandom.current().nextDouble() * Math.PI * 2;
@@ -1075,14 +1086,20 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                 continue;
             }
 
-            int y = world.getHighestBlockYAt(x, z) + 1;
+            int y = clamp(world.getHighestBlockYAt(x, z) + 1, minY, maxY);
             Location candidate = new Location(world, x + 0.5, y, z + 0.5, center.getYaw(), center.getPitch());
-            if (candidate.getBlock().isPassable()
-                    && candidate.clone().subtract(0, 1, 0).getBlock().getType().isSolid()) {
+            if (isSafeStandLocation(candidate)) {
                 return candidate;
             }
         }
-        return world.getSpawnLocation();
+        Location spawn = world.getSpawnLocation();
+        Location safe = findSafeInColumn(world, spawn.getBlockX(), spawn.getBlockZ(), spawn.getBlockY(), 64);
+        if (safe != null) {
+            safe.setYaw(center.getYaw());
+            safe.setPitch(center.getPitch());
+            return safe;
+        }
+        return spawn;
     }
 
     private void showYtpHelp(CommandSender sender) {

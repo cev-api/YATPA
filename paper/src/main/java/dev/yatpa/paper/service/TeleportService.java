@@ -185,19 +185,47 @@ public class TeleportService {
             return base;
         }
         int maxOffset = Math.max(1, config.landingRandomOffset());
+        int minY = world.getMinHeight() + 1;
+        int maxY = maxSafeLandingY(world);
         for (int i = 0; i < 8; i++) {
             int dx = ThreadLocalRandom.current().nextInt(maxOffset * 2 + 1) - maxOffset;
             int dz = ThreadLocalRandom.current().nextInt(maxOffset * 2 + 1) - maxOffset;
             int x = base.getBlockX() + dx;
             int z = base.getBlockZ() + dz;
-            int y = world.getHighestBlockYAt(x, z) + 1;
+            int y = Math.max(minY, Math.min(maxY, world.getHighestBlockYAt(x, z) + 1));
             Location candidate = new Location(world, x + 0.5, y, z + 0.5, base.getYaw(), base.getPitch());
-            if (candidate.getBlock().isPassable()
-                    && Objects.requireNonNull(candidate.clone().subtract(0, 1, 0).getBlock().getType()).isSolid()) {
+            if (isSafeStandLocation(candidate, minY, maxY)) {
                 return candidate;
             }
         }
         return base;
+    }
+
+    private int maxSafeLandingY(World world) {
+        int maxY = world.getMaxHeight() - 2;
+        if (world.getEnvironment() == World.Environment.NETHER) {
+            // Keep random landing offsets below the nether roof.
+            maxY = Math.min(maxY, 127);
+        }
+        return maxY;
+    }
+
+    private boolean isSafeStandLocation(Location location, int minY, int maxY) {
+        World world = location.getWorld();
+        if (world == null) {
+            return false;
+        }
+        int y = location.getBlockY();
+        if (y < minY || y > maxY) {
+            return false;
+        }
+        Location feet = location;
+        Location head = location.clone().add(0, 1, 0);
+        Location below = location.clone().subtract(0, 1, 0);
+        boolean feetClear = feet.getBlock().isPassable() && !feet.getBlock().isLiquid();
+        boolean headClear = head.getBlock().isPassable() && !head.getBlock().isLiquid();
+        boolean belowSolid = below.getBlock().getType().isSolid() && !below.getBlock().isLiquid();
+        return feetClear && headClear && belowSolid;
     }
 
     public void onMove(Player player) {
