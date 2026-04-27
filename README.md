@@ -1,7 +1,6 @@
 # YATPA
-Current version: `1.0.6`
 
-Yet Another TPA.
+![YATPA](https://i.imgur.com/2vqPt7F.png)
 
 YATPA is a teleport plugin/mod project for modern Minecraft servers:
 - `paper/`: Paper plugin (1.21.x API target)
