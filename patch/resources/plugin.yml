@@ -1,9 +1,11 @@
 name: YATPA
-version: 1.0.5
+version: 1.0.7
 main: dev.yatpa.paper.YatpaPaperPlugin
 api-version: '1.21'
 authors: [CevAPI]
 commands:
+  tp:
+    usage: /tp
   tpa:
     usage: /tpa <player>
   yatpa:
@@ -14,6 +16,8 @@ commands:
     usage: /tphelp
   tpahere:
     usage: /tpahere <player>
+  tphere:
+    usage: /tphere <player>
   tpaccept:
     usage: /tpaccept
   tpdeny:
@@ -26,6 +30,9 @@ commands:
     usage: /tpaunblock <player>
   tphome:
     usage: /tphome [set|delete|list|default] [name]
+    aliases: [tpahome]
+  tpahome:
+    usage: /tpahome [set|delete|list|default] [name]
   rtp:
     usage: /rtp
   spawn:
@@ -36,6 +43,12 @@ commands:
   tpoffline:
     usage: /tpoffline <player>
     permission: yatpa.op.tpoffline
+  tpaback:
+    usage: /tpaback
+    aliases: [tpdeath]
+  tpalog:
+    usage: /tpalog [page]
+    permission: yatpa.op.tpalog
   setspawn:
     usage: /setspawn
     permission: yatpa.op.setspawn
@@ -45,6 +58,8 @@ permissions:
   yatpa.op.tpoffline:
     default: op
   yatpa.op.reload:
+    default: op
+  yatpa.op.tpalog:
     default: op
   yatpa.op.setspawn:
     default: op

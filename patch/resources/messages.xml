@@ -31,6 +31,8 @@
   <message key="home_default_set">&aDefault home set to '%name%'.</message>
   <message key="home_limit">&cYou reached your home limit (%limit%).</message>
   <message key="offline_missing">&cNo logout location found for that player.</message>
+  <message key="death_missing">&cNo death location found yet.</message>
+  <message key="death_used">&cYou already used /tpaback for your last death. Die again to refresh it.</message>
   <message key="usage_tpa">&eUsage: /tpa &lt;player&gt;</message>
   <message key="usage_yatpa">&eUsage: /yatpa help | /yatpa reload | /yatpa settings | /yatpa gui | /yatpa set &lt;path&gt; &lt;value&gt;</message>
   <message key="usage_yatpa_help">&eUsage: /yatpa help</message>

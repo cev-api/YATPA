@@ -6,13 +6,32 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
 - `paper/`: Paper plugin (1.21.x API target)
 - `fabric/`: Fabric dedicated-server mod (1.21.x Mojmap/Fabric API scaffold)
 
-![Help](https://i.imgur.com/wPznadt.png)
+What makes YATPA stand out is that it combines full teleport-request/home/back/spawn/RTP/death tooling with a clickable in-chat command UX (`/tp` menu, paged pickers, and paged logs), while also exposing granular cost controls per teleport type. Economy mode is configurable as `NONE`, `XP_LEVELS`, `ITEM`, or `CURRENCY`; Paper supports `CURRENCY` through Vault (with EssentialsX or another Vault economy provider). OPs have an optional GUI menu to fine tune settings in-game.
+
+## Screenshots
+
+#### Help (via /TPAHELP)
+![Help](https://i.imgur.com/KKjMxrI.png)
+#### Clickable TP Menu (via /TP)
+![TP](https://i.imgur.com/lc8OQUP.png)
+#### Clickable TP Logs for OPs (via /TPLOG)
+![LOG](https://i.imgur.com/Z7yl2aa.png)
+#### Clickable Home List (via /TPHOME LIST)
+![HOMES](https://i.imgur.com/6sjWV2H.png)
+#### Clickable User List (via /TPA with no username specified)
+![LISTS](https://i.imgur.com/d2VgVum.png)
+#### OP Menu
+![Menu1](https://i.imgur.com/4NH1Ynk.png)
 
 ## Features
 
+- Clickable teleport menu:
+  - `/tp`
+  - Includes shortcuts for homes, RTP, spawn, death-back, TPA/TPHere, toggle, block, and unblock.
+  - Player pickers are paginated (5 per page) for `/tpa`, `/tphere`, `/tpablock`, and `/tpaunblock`.
 - Player teleport requests:
   - `/tpa <player>`
-  - `/tpahere <player>`
+  - `/tpahere <player>` or `/tphere <player>`
   - `/tpaccept`
   - `/tpdeny`
   - `/tpatoggle`
@@ -23,18 +42,20 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
   - `/tphome set default <name>`
   - `/tphome delete <name>`
   - `/tphome list`
-  - `/tphome [name]`
+  - `/tphome [name]` or `/tpahome [name]`
+  - Home list is clickable and shows coordinates.
+  - The default home is marked with `(default)`.
 - Utility teleports:
   - `/rtp`
   - `/spawn`
-  - `/tpaback` (last death location)
+  - `/tpaback` or `/tpdeath` (last death location, one use per death)
 - OP commands:
   - `/ytp <player>`
   - `/ytp <player> <targetPlayer>`
   - `/ytp <player> <x> <y> <z> [realm]`
   - `/ytp <x> <y> <z> [realm]` 
   - `/tpoffline <player>`
-  - `/tpalog [count]`
+  - `/tpalog [page]`
 - In-game admin config (OP):
   - `/yatpa settings`
   - `/yatpa gui` (Paper, paginated inventory editor for all settings; click to toggle/edit)
@@ -45,6 +66,7 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
   - `/tpahelp`
   - `/tphelp`
   - `/yatpa help`
+  - Public help intentionally excludes admin commands.
   - When teleport costs are enabled, a `Costs` section is shown at the bottom listing only teleports with non-zero costs.
 
 ## Notable Behavior
@@ -58,6 +80,10 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
   - Costs are validated before countdown and charged on execution.
   - Players are told exactly what they paid (XP, items, or currency).
   - `ytp`/`rtp` use safe landing checks to avoid unsafe blocks and lava.
+  - `/tpaback` and `/tpdeath` consume the saved death location after successful use, and require a new death to refresh.
+- Teleport logging:
+  - `/tpalog` is paginated and clickable.
+  - Log lines include context details (for example home name, target player, coords, or offline target) where relevant.
 - Costs and settings:
   - Cost modes: `NONE`, `XP_LEVELS`, `ITEM`, `CURRENCY`.
   - Realm-specific RTP costs and min/max RTP distance overrides are supported.
@@ -68,6 +94,7 @@ YATPA is a teleport plugin/mod project for modern Minecraft servers:
   - Spawn destination is configurable via `settings.spawn.*` and `/setspawn`.
 - Platform note:
   - Vault/EssentialsX currency charging is Paper-only in this release.
+  - Command/UX behavior in this README applies to both Paper and Fabric unless noted.
 
 ## Paper build output
 

@@ -194,12 +194,29 @@ public class DataStore {
         offline.set(path + ".z", location.getZ());
         offline.set(path + ".yaw", location.getYaw());
         offline.set(path + ".pitch", location.getPitch());
+        offline.set(path + ".used", false);
         save(offline, offlineFile);
+    }
+
+    public void clearDeathLocation(UUID uuid) {
+        String path = "deaths." + uuid;
+        offline.set(path + ".world", null);
+        offline.set(path + ".x", null);
+        offline.set(path + ".y", null);
+        offline.set(path + ".z", null);
+        offline.set(path + ".yaw", null);
+        offline.set(path + ".pitch", null);
+        offline.set(path + ".used", true);
+        save(offline, offlineFile);
+    }
+
+    public boolean deathLocationUsed(UUID uuid) {
+        return offline.getBoolean("deaths." + uuid + ".used", false);
     }
 
     public Location deathLocation(UUID uuid) {
         String path = "deaths." + uuid;
-        if (offline.get(path) == null) {
+        if (offline.get(path) == null || offline.getBoolean(path + ".used", false)) {
             return null;
         }
         World world = Bukkit.getWorld(offline.getString(path + ".world", ""));

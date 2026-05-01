@@ -16,7 +16,8 @@ public class XmlMessages {
     private final Map<String, String> messages = new HashMap<>();
     private static final Map<String, String> BUILTIN_FALLBACKS = Map.of(
         "teleport_disabled_dimension", "&cTeleporting is disabled in this dimension (%dimension%).",
-        "rtp_disabled_dimension", "&cRandom teleport is disabled in this dimension (%dimension%)."
+        "rtp_disabled_dimension", "&cRandom teleport is disabled in this dimension (%dimension%).",
+        "death_used", "&cYou already used /tpaback for your last death. Die again to refresh it."
     );
 
     public void load(File file) {

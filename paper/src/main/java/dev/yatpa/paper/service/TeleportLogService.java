@@ -13,6 +13,7 @@ public class TeleportLogService {
             String action,
             String actor,
             String payer,
+            String detail,
             String fromWorld,
             double fromX,
             double fromY,
@@ -31,6 +32,10 @@ public class TeleportLogService {
     }
 
     public synchronized void record(String action, String actor, String payer, Location from, Location to) {
+        record(action, actor, payer, "", from, to);
+    }
+
+    public synchronized void record(String action, String actor, String payer, String detail, Location from, Location to) {
         if (from == null || to == null || from.getWorld() == null || to.getWorld() == null) {
             return;
         }
@@ -39,6 +44,7 @@ public class TeleportLogService {
                 action,
                 actor,
                 payer,
+                detail == null ? "" : detail,
                 from.getWorld().getName(),
                 from.getX(),
                 from.getY(),

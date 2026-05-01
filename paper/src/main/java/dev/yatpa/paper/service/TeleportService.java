@@ -67,21 +67,31 @@ public class TeleportService {
 
     public boolean queueTeleport(Player actor, TeleportKind kind, Supplier<Location> destinationSupplier) {
         return queueTeleport(actor, kind, destinationSupplier, () -> {
-        }, actor);
+        }, actor, null, "");
     }
 
     public boolean queueTeleport(Player actor, TeleportKind kind, Supplier<Location> destinationSupplier,
             Runnable onSuccess) {
-        return queueTeleport(actor, kind, destinationSupplier, onSuccess, actor, null);
+        return queueTeleport(actor, kind, destinationSupplier, onSuccess, actor, null, "");
     }
 
     public boolean queueTeleport(Player actor, TeleportKind kind, Supplier<Location> destinationSupplier,
             Runnable onSuccess, Player payer) {
-        return queueTeleport(actor, kind, destinationSupplier, onSuccess, payer, null);
+        return queueTeleport(actor, kind, destinationSupplier, onSuccess, payer, null, "");
     }
 
     public boolean queueTeleport(Player actor, TeleportKind kind, Supplier<Location> destinationSupplier,
             Runnable onSuccess, Player payer, Player notifyPlayer) {
+        return queueTeleport(actor, kind, destinationSupplier, onSuccess, payer, notifyPlayer, "");
+    }
+
+    public boolean queueTeleport(Player actor, TeleportKind kind, Supplier<Location> destinationSupplier,
+            Runnable onSuccess, Player payer, String logDetail) {
+        return queueTeleport(actor, kind, destinationSupplier, onSuccess, payer, null, logDetail);
+    }
+
+    public boolean queueTeleport(Player actor, TeleportKind kind, Supplier<Location> destinationSupplier,
+            Runnable onSuccess, Player payer, Player notifyPlayer, String logDetail) {
         if (config.teleportDisabledIn(actor.getWorld())) {
             tell(actor, "teleport_disabled_dimension", Map.of("dimension", actor.getWorld().getName()));
             return false;
@@ -101,7 +111,7 @@ public class TeleportService {
         Location origin = actor.getLocation().clone();
         int delay = Math.max(0, config.teleportDelaySeconds());
         if (delay == 0) {
-            execute(actor, kind, payer.getUniqueId(), destinationSupplier, onSuccess);
+            execute(actor, kind, payer.getUniqueId(), destinationSupplier, onSuccess, logDetail);
             return true;
         }
 
@@ -115,7 +125,7 @@ public class TeleportService {
                     return;
                 }
                 if (remaining <= 0) {
-                    execute(actor, kind, payer.getUniqueId(), destinationSupplier, onSuccess);
+                    execute(actor, kind, payer.getUniqueId(), destinationSupplier, onSuccess, logDetail);
                     cancel(actor.getUniqueId(), "");
                     return;
                 }
@@ -137,7 +147,7 @@ public class TeleportService {
     }
 
     private void execute(Player actor, TeleportKind kind, UUID payerId, Supplier<Location> destinationSupplier,
-            Runnable onSuccess) {
+            Runnable onSuccess, String logDetail) {
         if (config.teleportDisabledIn(actor.getWorld())) {
             tell(actor, "teleport_disabled_dimension", Map.of("dimension", actor.getWorld().getName()));
             return;
@@ -173,7 +183,7 @@ public class TeleportService {
         Location from = actor.getLocation().clone();
         if (actor.teleport(adjusted)) {
             String payerName = payer.getUniqueId().equals(actor.getUniqueId()) ? "" : payer.getName();
-            teleportLog.record(kind.name(), actor.getName(), payerName, from, adjusted);
+            teleportLog.record(kind.name(), actor.getName(), payerName, logDetail, from, adjusted);
             onSuccess.run();
             tell(actor, "teleport_success");
             play(actor, "success");

@@ -61,8 +61,8 @@ public class YatpaPaperPlugin extends JavaPlugin {
         SettingsGui settingsGui = new SettingsGui(this, messages);
         YatpaCommandHandler handler = new YatpaCommandHandler(this, messages, configModel, dataStore, requests,
                 teleports, settingsGui, teleportLog);
-        for (String command : new String[] { "tpa", "yatpa", "tpahelp", "tphelp", "tpahere", "tpaccept", "tpdeny",
-                "tpatoggle", "tpablock", "tpaunblock", "tphome", "rtp", "spawn", "ytp", "tpoffline", "tpaback",
+        for (String command : new String[] { "tp", "tpa", "yatpa", "tpahelp", "tphelp", "tpahere", "tphere", "tpaccept", "tpdeny",
+                "tpatoggle", "tpablock", "tpaunblock", "tphome", "tpahome", "rtp", "spawn", "ytp", "tpoffline", "tpaback",
                 "tpalog",
                 "setspawn" }) {
             PluginCommand pluginCommand = getCommand(command);
