@@ -10,6 +10,7 @@ import dev.yatpa.paper.service.DataStore;
 import dev.yatpa.paper.service.RequestService;
 import dev.yatpa.paper.service.TeleportLogService;
 import dev.yatpa.paper.service.TeleportService;
+import dev.yatpa.paper.util.SchedulerBridge;
 import java.io.File;
 import java.util.Map;
 import net.milkbowl.vault.economy.Economy;
@@ -36,7 +37,7 @@ public class YatpaPaperPlugin extends JavaPlugin {
     }
 
     public void bootstrap() {
-        getServer().getScheduler().cancelTasks(this);
+        SchedulerBridge.cancelTasks(this);
         HandlerList.unregisterAll(this);
 
         if (!new File(getDataFolder(), "config.yml").exists()) {
@@ -77,7 +78,7 @@ public class YatpaPaperPlugin extends JavaPlugin {
 
         getServer().getPluginManager().registerEvents(new PlayerEventListener(teleports, dataStore), this);
         getServer().getPluginManager().registerEvents(settingsGui, this);
-        getServer().getScheduler().runTaskTimer(this, () -> {
+        SchedulerBridge.runRepeating(this, () -> {
             for (var expired : requests.purgeExpired()) {
                 String receiverName = Bukkit.getOfflinePlayer(expired.receiver()).getName();
                 if (receiverName == null) {

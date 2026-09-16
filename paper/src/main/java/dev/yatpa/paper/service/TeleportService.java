@@ -3,23 +3,22 @@ package dev.yatpa.paper.service;
 import dev.yatpa.paper.config.XmlMessages;
 import dev.yatpa.paper.config.YatpaConfig;
 import dev.yatpa.paper.data.TeleportKind;
+import dev.yatpa.paper.util.SchedulerBridge;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
-import net.kyori.adventure.text.Component;
 import org.bukkit.Location;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
 
 public class TeleportService {
-    private record PendingTeleport(BukkitTask task, Location origin, TeleportKind kind, UUID payerId,
+    private record PendingTeleport(SchedulerBridge.Task task, Location origin, TeleportKind kind, UUID payerId,
             UUID notifyPlayerId) {
     }
 
@@ -115,7 +114,7 @@ public class TeleportService {
             return true;
         }
 
-        BukkitTask task = plugin.getServer().getScheduler().runTaskTimer(plugin, new Runnable() {
+        SchedulerBridge.Task task = SchedulerBridge.runRepeatingForPlayer(plugin, actor, new Runnable() {
             int remaining = delay;
 
             @Override
@@ -130,7 +129,9 @@ public class TeleportService {
                     return;
                 }
                 String text = messages.format("countdown", Map.of("seconds", Integer.toString(remaining)));
-                actor.sendActionBar(Component.text(text));
+                // String action bars are part of the Bukkit API and work on
+                // Spigot, Paper, Purpur, Bukkit, and Folia alike.
+                actor.sendActionBar(text);
                 play(actor, "countdown");
                 remaining--;
             }

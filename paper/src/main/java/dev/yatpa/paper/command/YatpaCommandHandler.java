@@ -12,6 +12,7 @@ import dev.yatpa.paper.service.DataStore;
 import dev.yatpa.paper.service.RequestService;
 import dev.yatpa.paper.service.TeleportLogService;
 import dev.yatpa.paper.service.TeleportService;
+import dev.yatpa.paper.util.TextCompat;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -160,7 +161,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
     }
 
     private void showTeleportMenu(Player player) {
-        player.sendMessage(Component.text("----- ", NamedTextColor.DARK_GRAY)
+        TextCompat.send(player, Component.text("----- ", NamedTextColor.DARK_GRAY)
                 .append(Component.text("YATPA Teleports", NamedTextColor.GOLD))
                 .append(Component.text(" -----", NamedTextColor.DARK_GRAY)));
         if (config.homesEnabled()) {
@@ -184,11 +185,11 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         sendMenuLine(player, "/tpatoggle", "Toggle incoming requests", "/tpatoggle");
         sendMenuLine(player, "/tpablock", "Block requests from a player", "/tp players tpablock 1");
         sendMenuLine(player, "/tpaunblock", "Unblock requests from a player", "/tp players tpaunblock 1");
-        player.sendMessage(Component.text("Offline names: type /tpablock <name> or /tpaunblock <name>", NamedTextColor.GRAY));
+        TextCompat.send(player, Component.text("Offline names: type /tpablock <name> or /tpaunblock <name>", NamedTextColor.GRAY));
     }
 
     private void sendMenuLine(Player player, String command, String description, String clickCommand) {
-        player.sendMessage(Component.text("- ", NamedTextColor.GREEN)
+        TextCompat.send(player, Component.text("- ", NamedTextColor.GREEN)
                 .append(Component.text(command, NamedTextColor.YELLOW)
                         .clickEvent(ClickEvent.runCommand(clickCommand))
                         .hoverEvent(HoverEvent.showText(Component.text("Click: " + clickCommand))))
@@ -220,17 +221,17 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         int page = Math.max(1, Math.min(totalPages, requestedPage));
         String command = blockMode ? "tpablock" : unblockMode ? "tpaunblock" : hereMode ? "tphere" : "tpa";
         String title = blockMode ? "Block Players" : unblockMode ? "Unblock Players" : hereMode ? "TPHere Players" : "TPA Players";
-        player.sendMessage(Component.text("----- ", NamedTextColor.DARK_GRAY)
+        TextCompat.send(player, Component.text("----- ", NamedTextColor.DARK_GRAY)
                 .append(Component.text(title, NamedTextColor.AQUA))
                 .append(Component.text(" -----", NamedTextColor.DARK_GRAY)));
         if (blockMode || unblockMode) {
-            player.sendMessage(Component.text("Offline names work too: /" + command + " <name>", NamedTextColor.GRAY));
+            TextCompat.send(player, Component.text("Offline names work too: /" + command + " <name>", NamedTextColor.GRAY));
         }
         int start = (page - 1) * PLAYER_PAGE_SIZE;
         int end = Math.min(players.size(), start + PLAYER_PAGE_SIZE);
         for (Player target : players.subList(start, end)) {
             String run = "/" + command + " " + target.getName();
-            player.sendMessage(Component.text("- ", NamedTextColor.GREEN)
+            TextCompat.send(player, Component.text("- ", NamedTextColor.GREEN)
                     .append(Component.text(target.getName(), NamedTextColor.YELLOW)
                             .clickEvent(ClickEvent.runCommand(run))
                             .hoverEvent(HoverEvent.showText(Component.text("Click: " + run))))
@@ -258,7 +259,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                     .hoverEvent(HoverEvent.showText(Component.text("Page " + i)));
             line = line.append(pageNumber);
         }
-        player.sendMessage(line.append(Component.text(")", NamedTextColor.GRAY)));
+        TextCompat.send(player, line.append(Component.text(")", NamedTextColor.GRAY)));
     }
 
     private boolean handleTpa(CommandSender sender, String[] args) {
@@ -557,7 +558,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                 .color(NamedTextColor.RED)
                 .clickEvent(ClickEvent.runCommand("/tpdeny"))
                 .hoverEvent(HoverEvent.showText(Component.text(messages.get("deny_hover"))));
-        target.sendMessage(accept.append(Component.text(" ")).append(deny));
+        TextCompat.send(target, accept.append(Component.text(" ")).append(deny));
 
         teleports.play(sender, "request_sent");
         teleports.play(target, "request_received");
@@ -788,11 +789,11 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
     private void sendHomeList(Player player) {
         Map<String, HomeLocation> homes = dataStore.homes(player.getUniqueId());
         String defaultHome = dataStore.defaultHome(player.getUniqueId());
-        player.sendMessage(Component.text("----- ", NamedTextColor.DARK_GRAY)
+        TextCompat.send(player, Component.text("----- ", NamedTextColor.DARK_GRAY)
                 .append(Component.text("Your Homes", NamedTextColor.GOLD))
                 .append(Component.text(" -----", NamedTextColor.DARK_GRAY)));
         if (homes.isEmpty()) {
-            player.sendMessage(Component.text("- no homes set", NamedTextColor.GRAY));
+            TextCompat.send(player, Component.text("- no homes set", NamedTextColor.GRAY));
             return;
         }
         homes.entrySet().stream()
@@ -806,7 +807,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                             + formatCoordinate(home.x()) + ", "
                             + formatCoordinate(home.y()) + ", "
                             + formatCoordinate(home.z());
-                    player.sendMessage(Component.text("- ", NamedTextColor.GREEN)
+                    TextCompat.send(player, Component.text("- ", NamedTextColor.GREEN)
                             .append(Component.text(name, NamedTextColor.YELLOW)
                                     .clickEvent(ClickEvent.runCommand(run))
                                     .hoverEvent(HoverEvent.showText(Component.text("Click to teleport to " + name))))
@@ -1112,11 +1113,11 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
         page = Math.max(1, Math.min(totalPages, page));
         int start = (page - 1) * TPALOG_PAGE_SIZE;
         int end = Math.min(recent.size(), start + TPALOG_PAGE_SIZE);
-        sender.sendMessage(Component.text("----- ", NamedTextColor.DARK_GRAY)
+        TextCompat.send(sender, Component.text("----- ", NamedTextColor.DARK_GRAY)
                 .append(Component.text("YATPA Teleport Log", NamedTextColor.GOLD))
                 .append(Component.text(" -----", NamedTextColor.DARK_GRAY)));
         for (TeleportLogService.Entry entry : recent.subList(start, end)) {
-            sender.sendMessage(formatLogEntry(entry));
+            TextCompat.send(sender, formatLogEntry(entry));
         }
         sendTpaLogPageLine(sender, page, totalPages);
         return true;
@@ -1154,7 +1155,7 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
                     .clickEvent(ClickEvent.runCommand("/tpalog " + i))
                     .hoverEvent(HoverEvent.showText(Component.text("Page " + i))));
         }
-        sender.sendMessage(line.append(Component.text(")", NamedTextColor.GRAY)));
+        TextCompat.send(sender, line.append(Component.text(")", NamedTextColor.GRAY)));
     }
 
     private String shortLocation(String world, double x, double y, double z) {

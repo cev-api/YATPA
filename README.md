@@ -3,8 +3,8 @@
 ![YATPA](https://i.imgur.com/2vqPt7F.png)
 
 YATPA is a teleport plugin/mod project for modern Minecraft servers:
-- `paper/`: Paper plugin (1.21.x API target)
-- `fabric/`: Fabric dedicated-server mod (Minecraft 1.21.6, Fabric API 0.128.2+, Fabric Loader 0.16.13+)
+- `paper/`: Paper plugin targeting the 26.2 API (Java 25)
+- `fabric/`: Fabric dedicated-server mod targeting Minecraft 26.2 (Fabric API 0.160.0+, Fabric Loader 0.19.5+)
 
 What makes YATPA stand out is that it combines full teleport-request/home/back/spawn/RTP/death tooling with a clickable in-chat command UX (`/tp` menu, paged pickers, and paged logs), while also exposing granular cost controls per teleport type. Economy mode is configurable as `NONE`, `XP_LEVELS`, `ITEM`, or `CURRENCY`; Paper supports `CURRENCY` through Vault (with EssentialsX or another Vault economy provider). OPs have an optional GUI menu to fine tune settings in-game.
 
@@ -20,8 +20,6 @@ What makes YATPA stand out is that it combines full teleport-request/home/back/s
 ![HOMES](https://i.imgur.com/6sjWV2H.png)
 #### Clickable User List (via /TPA with no username specified)
 ![LISTS](https://i.imgur.com/d2VgVum.png)
-#### OP Dialog Menu
-![Menu1](https://i.imgur.com/4NH1Ynk.png)
 
 ## Features
 
@@ -58,7 +56,7 @@ What makes YATPA stand out is that it combines full teleport-request/home/back/s
   - `/tpalog [page]`
 - In-game admin config (OP):
   - `/yatpa settings`
-  - `/yatpa gui` (Paper/Fabric native dialog editor; Paper uses the inventory editor on pre-1.21.6 servers)
+  - `/yatpa gui` (Paper/Fabric native dialog editor; Paper uses the inventory editor when the server does not expose the dialog command)
   - `/yatpa set <path> <value>`
   - `/yatpa reload`
   - `/setspawn`
@@ -71,22 +69,9 @@ What makes YATPA stand out is that it combines full teleport-request/home/back/s
 
 ## OP dialog menu
 
-Run `/yatpa gui` to open the native Minecraft dialog editor. The first screen is a category dashboard; choose **Features**, **Core**, **Spawn**, **RTP**, **Restrictions**, **Landing**, **Costs**, **Sounds**, **Effects**, or **Other**. Category pages keep each setting beside its control and use a short descriptive title, so there is no separate submenu for every key.
+Run `/yatpa gui` for a modern in-game settings editor. It organizes YATPA options into clear categories with inline toggles, selectors, and text fields, with validation and save controls built in. Paper falls back to the inventory editor when native dialogs are unavailable; Fabric requires no client-side YATPA mod.
 
-- Boolean settings use checkboxes; cost and landing modes use compact option controls.
-- Numbers, names, materials, sounds, effects, and comma-separated lists use text fields with the current value already filled in. This allows decimals, negative values, large values, custom names, and empty lists without a slider.
-- The **Costs** section is grouped by purpose: page 1 contains the cost switch, mode, and XP charges; page 2 contains item charges and the item material; page 3 contains currency charges.
-- Press **Save changes** once to save every control on the current page. **Back** discards unsaved input, **Next** and **Previous** move between pages, and **Close** exits the editor. **Reload configuration** rereads the saved files.
-- Validation errors and save confirmations appear in the dialog. Permissions are checked again for every submitted action.
-- Native dialogs require a **1.21.6+ client and server**. Paper retains its older inventory fallback when the server has no dialog command. Protocol translators cannot add dialogs to older clients.
-- The Fabric artifact now targets **1.21.6 specifically**; the former 1.21.1 artifact cannot use native dialogs. No client-side YATPA mod is required.
-- Paper requires `yatpa.op.reload`; Fabric requires operator permission level 2. Existing `/yatpa settings` and `/yatpa set` commands remain available.
-
-### Verification
-
-`./gradlew :paper:build :fabric:build` compiles both artifacts and runs shared dialog regression checks via each platform's `check` task. Fabric also validates the generated payloads and submission escaping against Minecraft's native dialog codecs.
-
-In-game smoke test on both platforms: open `/yatpa gui`, edit several controls on one category page, press **Save changes**, change a mode, clear a blacklist, and try an invalid material. Verify that Back does not save, successful changes survive reload, and a player without admin permission cannot open or submit the menu. On an older Paper server, verify the inventory fallback.
+![GUI](https://i.imgur.com/M6RCQ3Y.png)
 
 ## Notable Behavior
 
@@ -113,21 +98,24 @@ In-game smoke test on both platforms: open `/yatpa gui`, edit several controls o
   - Spawn destination is configurable via `settings.spawn.*` and `/setspawn`.
 - Platform note:
   - Vault/EssentialsX currency charging is Paper-only in this release.
+  - The Paper jar uses Bukkit APIs and is marked Folia-compatible, so it runs on Paper, Purpur, Spigot, Bukkit, and Folia. Native dialogs are used when available; the inventory editor remains the fallback on Bukkit-family servers without them.
   - Command/UX behavior in this README applies to both Paper and Fabric unless noted.
 
 ## Paper build output
 
-The Paper module is configured to build:
+The Paper module is configured to build for the 26.2 API:
 - `paper/build/libs/YATPA-v1.x.x-Paper.jar`
 
 ## Fabric build output
 
-The Fabric module is configured to build:
+The Fabric module is configured to build for Minecraft 26.2:
 - `fabric/build/libs/YATPA-v1.x.x-Fabric.jar`
 
 ## Build
 
 From repo root:
+
+Builds target Minecraft 26.2 and require **Java 25**. The wrapper uses Gradle 9.7, which is required by the 26.2 Fabric Loom toolchain.
 
 ```bash
 # Both Paper + Fabric

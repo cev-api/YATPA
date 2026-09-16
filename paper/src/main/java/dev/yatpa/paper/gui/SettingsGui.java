@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.bukkit.Bukkit;
+import dev.yatpa.paper.util.SchedulerBridge;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.Particle;
@@ -603,10 +604,10 @@ public class SettingsGui implements Listener {
         String category = lastCategoryByPlayer.get(player.getUniqueId());
         Integer page = lastCategoryPageByPlayer.get(player.getUniqueId());
         if (category == null || page == null) {
-            Bukkit.getScheduler().runTask(plugin, () -> openSelector(player));
+            SchedulerBridge.runForPlayer(plugin, player, () -> openSelector(player));
             return;
         }
-        Bukkit.getScheduler().runTask(plugin, () -> openCategory(player, category, page));
+        SchedulerBridge.runForPlayer(plugin, player, () -> openCategory(player, category, page));
     }
 
     public boolean saveDialogValue(Player player, String pathToken, String raw) {
@@ -737,7 +738,7 @@ public class SettingsGui implements Listener {
         if (holder.mode == ViewMode.SELECTOR) {
             if (slot == SLOT_RELOAD) {
                 plugin.reloadAll();
-                Bukkit.getScheduler().runTask(plugin, () -> openSelector(player));
+                SchedulerBridge.runForPlayer(plugin, player, () -> openSelector(player));
                 return;
             }
             if (slot == SLOT_CLOSE) {
@@ -765,7 +766,7 @@ public class SettingsGui implements Listener {
         }
         if (slot == SLOT_RELOAD) {
             plugin.reloadAll();
-            Bukkit.getScheduler().runTask(plugin, () -> openCategory(player, holder.categoryName, holder.page));
+            SchedulerBridge.runForPlayer(plugin, player, () -> openCategory(player, holder.categoryName, holder.page));
             return;
         }
         if (slot == SLOT_CLOSE) {
@@ -790,17 +791,17 @@ public class SettingsGui implements Listener {
             plugin.getConfig().set(path, event.getCursor().getType().name());
             plugin.saveConfig();
             plugin.reloadAll();
-            Bukkit.getScheduler().runTask(plugin, () -> openCategory(player, holder.categoryName, holder.page));
+            SchedulerBridge.runForPlayer(plugin, player, () -> openCategory(player, holder.categoryName, holder.page));
             return;
         }
         if (isCostModePath(path) || isLandingModePath(path) || isSoundPath(path) || isEffectPath(path)) {
             cycleStringOption(path, optionsForPath(path), !event.isRightClick());
-            Bukkit.getScheduler().runTask(plugin, () -> openCategory(player, holder.categoryName, holder.page));
+            SchedulerBridge.runForPlayer(plugin, player, () -> openCategory(player, holder.categoryName, holder.page));
             return;
         }
         if (kind == ValueKind.BOOLEAN && event.isLeftClick() && !event.isShiftClick()) {
             toggleBoolean(path);
-            Bukkit.getScheduler().runTask(plugin, () -> openCategory(player, holder.categoryName, holder.page));
+            SchedulerBridge.runForPlayer(plugin, player, () -> openCategory(player, holder.categoryName, holder.page));
             return;
         }
         promptEdit(player, path);
@@ -814,7 +815,7 @@ public class SettingsGui implements Listener {
             return;
         event.setCancelled(true);
         String value = event.getMessage();
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        SchedulerBridge.runForPlayer(plugin, event.getPlayer(), () -> {
             Player player = Bukkit.getPlayer(id);
             if (player == null || !player.isOnline())
                 return;

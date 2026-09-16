@@ -1,7 +1,8 @@
 name: YATPA
-version: 1.0.7
+version: 1.0.8
 main: dev.yatpa.paper.YatpaPaperPlugin
-api-version: '1.21'
+api-version: '26.2'
+folia-supported: true
 authors: [CevAPI]
 softdepend: [Vault, Essentials, EssentialsX]
 commands:
