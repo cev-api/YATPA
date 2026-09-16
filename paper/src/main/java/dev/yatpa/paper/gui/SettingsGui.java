@@ -61,11 +61,31 @@ public class SettingsGui implements Listener {
     }
 
     public boolean openFor(Player player) {
+        return openFor(player, "", "");
+    }
+
+    public boolean openFor(Player player, String route, String status) {
         if (!player.hasPermission("yatpa.op.reload")) {
             player.sendMessage(messages.get("prefix") + messages.get("no_permission"));
             return true;
         }
-        openSelector(player);
+        if (Bukkit.getServer().getCommandMap().getCommand("minecraft:dialog") != null) {
+            if (route.equals("reload")) {
+                plugin.reloadAll();
+                route = "";
+                status = "Configuration reloaded.";
+            }
+            Map<String, Object> values = new LinkedHashMap<>();
+            for (String path : editableConfigPaths()) values.put(path, normalizedValue(path, plugin.getConfig().get(path)));
+            String json = new com.google.gson.Gson().toJson(dev.yatpa.dialog.SettingsDialog.screen(values, route, status));
+            player.closeInventory();
+            // Paper's vanilla wrapper accepts player names reliably here. UUIDs are
+            // parsed as generic entity selectors on some Paper builds and then fail
+            // the dialog command's player-only target check.
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "minecraft:dialog show " + player.getName() + " " + json);
+        } else {
+            openSelector(player);
+        }
         return true;
     }
 
@@ -275,7 +295,8 @@ public class SettingsGui implements Listener {
     }
 
     private boolean isDoublePath(String path) {
-        return path.contains(".costs.currency.");
+        return path.contains(".costs.currency.")
+                || List.of("settings.spawn.x", "settings.spawn.y", "settings.spawn.z", "settings.spawn.yaw", "settings.spawn.pitch").contains(path);
     }
 
     private boolean isCostModePath(String path) {
@@ -299,6 +320,8 @@ public class SettingsGui implements Listener {
     }
 
     private ValueKind valueKind(String path, Object current) {
+        if (path.equals("settings.rtp.blacklisted_worlds"))
+            return ValueKind.LIST;
         if (isBooleanPath(path))
             return ValueKind.BOOLEAN;
         if (isCostModePath(path) || isLandingModePath(path) || isMaterialPath(path) || isSoundPath(path)
@@ -308,6 +331,10 @@ public class SettingsGui implements Listener {
             return ValueKind.INTEGER;
         if (isDoublePath(path))
             return ValueKind.DOUBLE;
+        if (current instanceof Boolean)
+            return ValueKind.BOOLEAN;
+        if (current instanceof Integer)
+            return ValueKind.INTEGER;
         if (current instanceof Long)
             return ValueKind.LONG;
         if (current instanceof Double)
@@ -582,7 +609,77 @@ public class SettingsGui implements Listener {
         Bukkit.getScheduler().runTask(plugin, () -> openCategory(player, category, page));
     }
 
+    public boolean saveDialogValue(Player player, String pathToken, String raw) {
+        if (!player.hasPermission("yatpa.op.reload")) return openFor(player);
+        String path;
+        try { path = dev.yatpa.dialog.SettingsDialog.decodePath(pathToken); }
+        catch (IllegalArgumentException e) { return openFor(player, "", "Unknown setting."); }
+        if (!editableConfigPaths().contains(path)) return openFor(player, "", "Unknown setting.");
+        String value;
+        try { value = dev.yatpa.dialog.SettingsDialog.decodeSubmission(raw); }
+        catch (IllegalArgumentException e) { return openFor(player, path, e.getMessage()); }
+        Object parsed = parsePathAwareValue(path, valueKind(path, plugin.getConfig().get(path)), value);
+        if (parsed == null || (parsed instanceof Number n && !Double.isFinite(n.doubleValue()))) {
+            return openFor(player, "exact:" + path, "Invalid value. Nothing was saved.");
+        }
+        maybeMigrateGlobalRtpCostToRealm(path);
+        plugin.getConfig().set(path, parsed);
+        plugin.saveConfig();
+        plugin.reloadAll();
+        return openFor(player, path, "Saved successfully.");
+    }
+
+    public boolean saveDialogBulk(Player player, String route, List<String> submitted) {
+        if (!player.hasPermission("yatpa.op.reload")) return openFor(player);
+        List<String> valuesSubmitted = new ArrayList<>();
+        for (String token : submitted) {
+            if (token.length() >= 2 && token.charAt(0) == '"' && token.charAt(token.length() - 1) == '"') {
+                try {
+                    List<String> decoded = dev.yatpa.dialog.SettingsDialog.decodeBulkValues(token);
+                    valuesSubmitted.add(decoded.size() == 1 ? decoded.getFirst() : token);
+                } catch (IllegalArgumentException e) {
+                    return openFor(player, route, e.getMessage());
+                }
+            } else {
+                valuesSubmitted.add(token);
+            }
+        }
+        String[] routeParts = route.split("#", 2);
+        String category = routeParts[0];
+        int page = 1;
+        if (routeParts.length == 2) {
+            try { page = Integer.parseInt(routeParts[1]); }
+            catch (NumberFormatException ignored) { }
+        }
+        Map<String, Object> values = dialogValues();
+        List<String> paths = dev.yatpa.dialog.SettingsDialog.visiblePaths(values, category, page);
+        if (valuesSubmitted.size() != paths.size()) return openFor(player, route, "Some controls were not submitted. Nothing was saved.");
+        Map<String, Object> parsed = new LinkedHashMap<>();
+        for (int i = 0; i < paths.size(); i++) {
+            String path = paths.get(i);
+            Object value = parsePathAwareValue(path, valueKind(path, plugin.getConfig().get(path)), valuesSubmitted.get(i));
+            if (value == null || (value instanceof Number n && !Double.isFinite(n.doubleValue()))) {
+                return openFor(player, route, "Invalid value for " + dev.yatpa.dialog.SettingsDialog.label(path) + ". Nothing was saved.");
+            }
+            parsed.put(path, value);
+        }
+        for (Map.Entry<String, Object> entry : parsed.entrySet()) {
+            maybeMigrateGlobalRtpCostToRealm(entry.getKey());
+            plugin.getConfig().set(entry.getKey(), entry.getValue());
+        }
+        plugin.saveConfig();
+        plugin.reloadAll();
+        return openFor(player, route, "Changes saved.");
+    }
+
+    private Map<String, Object> dialogValues() {
+        Map<String, Object> values = new LinkedHashMap<>();
+        for (String path : editableConfigPaths()) values.put(path, normalizedValue(path, plugin.getConfig().get(path)));
+        return values;
+    }
+
     private void applyChatValue(Player player, String path, String rawValue) {
+        if (!player.hasPermission("yatpa.op.reload")) return;
         String input = rawValue.trim();
         if (input.equalsIgnoreCase("cancel")) {
             player.sendMessage(messages.get("prefix") + ChatColor.GRAY + "Edit cancelled.");

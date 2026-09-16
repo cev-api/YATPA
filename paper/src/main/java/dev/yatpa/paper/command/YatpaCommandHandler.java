@@ -307,12 +307,18 @@ public class YatpaCommandHandler implements CommandExecutor, TabCompleter {
             showSettings(sender);
             return true;
         }
-        if (args.length == 1 && args[0].equalsIgnoreCase("gui")) {
+        if (args.length >= 1 && args[0].equalsIgnoreCase("gui")) {
             if (!(sender instanceof Player player)) {
                 send(sender, "player_only");
                 return true;
             }
-            return settingsGui.openFor(player);
+            return settingsGui.openFor(player, args.length > 1 ? args[1] : "", "");
+        }
+        if (args.length >= 3 && args[0].equalsIgnoreCase("guisavebulk") && sender instanceof Player player) {
+            return settingsGui.saveDialogBulk(player, args[1], Arrays.asList(Arrays.copyOfRange(args, 2, args.length)));
+        }
+        if (args.length >= 3 && args[0].equalsIgnoreCase("guisave") && sender instanceof Player player) {
+            return settingsGui.saveDialogValue(player, args[1], String.join(" ", Arrays.copyOfRange(args, 2, args.length)));
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("set")) {
             return showSetting(sender, args[1]);

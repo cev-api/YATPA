@@ -7,6 +7,8 @@ base {
     archivesName.set("YATPA")
 }
 
+sourceSets.main { java.srcDir("../shared/src/main/java") }
+
 java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(21))
@@ -14,10 +16,10 @@ java {
 }
 
 dependencies {
-    minecraft("com.mojang:minecraft:1.21.1")
+    minecraft("com.mojang:minecraft:1.21.6")
     mappings(loom.officialMojangMappings())
-    modImplementation("net.fabricmc:fabric-loader:0.16.10")
-    modImplementation("net.fabricmc.fabric-api:fabric-api:0.116.6+1.21.1")
+    modImplementation("net.fabricmc:fabric-loader:0.16.13")
+    modImplementation("net.fabricmc.fabric-api:fabric-api:0.128.2+1.21.6")
 }
 
 tasks.withType<JavaCompile>().configureEach {
@@ -32,3 +34,21 @@ tasks.named<org.gradle.jvm.tasks.Jar>("jar") {
 tasks.named<net.fabricmc.loom.task.RemapJarTask>("remapJar") {
     archiveFileName.set("YATPA-v${project.version}-Fabric.jar")
 }
+
+sourceSets.test { java.srcDir("../shared/src/test/java") }
+
+val dialogTest by tasks.registering(JavaExec::class) {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass.set("dev.yatpa.dialog.SettingsDialogTest")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+}
+tasks.check { dependsOn(dialogTest) }
+
+val dialogCodecTest by tasks.registering(JavaExec::class) {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass.set("dev.yatpa.fabric.DialogCodecTest")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+}
+tasks.check { dependsOn(dialogCodecTest) }
